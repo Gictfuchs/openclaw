@@ -30,6 +30,16 @@ dependencies = [
     # Configuration
     "pydantic-settings>=2.6.0",
 
+    # GitHub
+    "PyGithub>=2.5.0",
+
+    # E-Mail
+    "aiosmtplib>=3.0.0",
+    "aioimaplib>=2.0.0",
+
+    # RSS
+    "feedparser>=6.0.0",
+
     # Logging
     "structlog>=24.0.0",
 ]
@@ -71,7 +81,7 @@ warn_unused_configs = true
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["telegram.*", "chromadb.*"]
+module = ["telegram.*", "chromadb.*", "github.*", "aioimaplib.*", "aiosmtplib.*", "feedparser.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

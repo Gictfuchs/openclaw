@@ -101,7 +101,8 @@ class FochsTelegramBot:
             "/status - Agent-Status anzeigen\n"
             "/research <thema> - Tiefe Recherche\n"
             "/clear - Gespraechsverlauf loeschen\n\n"
-            "Oder schreib einfach eine Nachricht!",
+            "Oder schreib einfach eine Nachricht!\n"
+            "Ich kann auch GitHub Repos pruefen, E-Mails lesen/senden und RSS Feeds abrufen.",
             parse_mode="Markdown",
         )
 

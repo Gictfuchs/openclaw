@@ -8,6 +8,9 @@ import structlog
 from openclaw.config import Settings
 from openclaw.core.agent import FochsAgent
 from openclaw.integrations.brave import BraveSearchClient
+from openclaw.integrations.email import EmailClient, EmailConfig
+from openclaw.integrations.github import GitHubClient
+from openclaw.integrations.rss import RSSClient
 from openclaw.llm.claude import ClaudeLLM
 from openclaw.llm.gemini import GeminiLLM
 from openclaw.llm.grok import GrokLLM
@@ -17,8 +20,11 @@ from openclaw.research.engine import ResearchEngine
 from openclaw.security.budget import TokenBudget
 from openclaw.security.logging import setup_secure_logging
 from openclaw.telegram.bot import FochsTelegramBot
+from openclaw.tools.email_tools import ReadEmailsTool, SendEmailTool
+from openclaw.tools.github_tools import GitHubCreateIssueTool, GitHubIssuesTool, GitHubRepoTool
 from openclaw.tools.google_search import GoogleSearchTool
 from openclaw.tools.registry import ToolRegistry
+from openclaw.tools.rss_tools import CheckFeedTool
 from openclaw.tools.web_scrape import WebScrapeTool
 from openclaw.tools.web_search import WebSearchTool
 
@@ -102,7 +108,31 @@ class FochsApp:
         registry.register(self._scraper)
         logger.info("tool_configured", tool="web_scrape")
 
-        # TODO Phase 3: github, email, calendar, rss
+        # Phase 3: GitHub, Email, RSS tools
+        gh_token = self.settings.github_token.get_secret_value()
+        if gh_token:
+            gh_client = GitHubClient(token=gh_token)
+            registry.register(GitHubRepoTool(client=gh_client))
+            registry.register(GitHubIssuesTool(client=gh_client))
+            registry.register(GitHubCreateIssueTool(client=gh_client))
+            logger.info("tool_configured", tool="github")
+
+        if self.settings.email_address and self.settings.email_imap_host:
+            email_client = EmailClient(EmailConfig(
+                address=self.settings.email_address,
+                password=self.settings.email_password.get_secret_value(),
+                imap_host=self.settings.email_imap_host,
+                smtp_host=self.settings.email_smtp_host,
+            ))
+            registry.register(ReadEmailsTool(client=email_client))
+            if self.settings.email_smtp_host:
+                registry.register(SendEmailTool(client=email_client))
+            logger.info("tool_configured", tool="email")
+
+        rss_client = RSSClient()
+        registry.register(CheckFeedTool(client=rss_client))
+        logger.info("tool_configured", tool="rss")
+
         # TODO Phase 4: memory_tools
         # TODO Phase 5: scheduler_tools
         # TODO Phase 6: sub_agent_tools
