@@ -1,14 +1,20 @@
 """FochsAgent - the main agent class."""
 
-from collections.abc import AsyncIterator
-from typing import Any
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
 
 import structlog
 
 from openclaw.core.agent_loop import AgentLoop
-from openclaw.core.events import AgentEvent
-from openclaw.llm.router import LLMRouter
-from openclaw.tools.registry import ToolRegistry
+from openclaw.core.events import AgentEvent, ResponseEvent
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
+    from openclaw.llm.router import LLMRouter
+    from openclaw.memory.long_term import LongTermMemory
+    from openclaw.tools.registry import ToolRegistry
 
 logger = structlog.get_logger()
 
@@ -51,10 +57,12 @@ class FochsAgent:
         llm: LLMRouter,
         tools: ToolRegistry,
         max_iterations: int = 10,
+        memory: LongTermMemory | None = None,
     ) -> None:
         self.llm = llm
         self.tools = tools
         self.max_iterations = max_iterations
+        self.memory = memory
         self._conversations: dict[int, list[dict[str, Any]]] = {}
 
     async def process(
@@ -72,14 +80,29 @@ class FochsAgent:
             max_iterations=self.max_iterations,
         )
 
+        # Collect the final response for memory storage
+        last_response = ""
         async for event in loop.run(message, conversation_history=history):
+            if isinstance(event, ResponseEvent):
+                last_response = event.content
             yield event
 
-        # Update conversation history
+        # Update short-term conversation history
         history.append({"role": "user", "content": message})
+        if last_response:
+            history.append({"role": "assistant", "content": last_response})
         if len(history) > 50:
             history = history[-50:]
         self._conversations[user_id] = history
+
+        # Persist to long-term memory (fire and forget)
+        if self.memory:
+            try:
+                await self.memory.store_message(user_id, "user", message)
+                if last_response:
+                    await self.memory.store_message(user_id, "assistant", last_response)
+            except Exception as e:
+                logger.warning("memory_store_failed", error=str(e))
 
     def clear_history(self, user_id: int) -> None:
         """Clear conversation history for a user."""
@@ -91,10 +114,14 @@ class FochsAgent:
         budget_status = {}
         if self.llm.budget:
             budget_status = self.llm.budget.get_status()
+        memory_stats = {}
+        if self.memory:
+            memory_stats = self.memory.get_stats()
         return {
             "status": "running",
             "tools": self.tools.tool_names,
             "llm_providers": availability,
             "active_conversations": len(self._conversations),
             "budget": budget_status,
+            "memory": memory_stats,
         }

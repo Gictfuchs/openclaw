@@ -1,7 +1,7 @@
 """Citation tracking for research results."""
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 
 @dataclass
@@ -12,7 +12,7 @@ class Citation:
     title: str
     snippet: str = ""
     source_type: str = "web"  # web, news, google, x, scrape
-    retrieved_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    retrieved_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     def format(self, index: int) -> str:
         """Format as a numbered citation."""

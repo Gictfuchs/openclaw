@@ -83,21 +83,25 @@ class BraveSearchClient:
 
         results = []
         for item in data.get("web", {}).get("results", []):
-            results.append(SearchResult(
-                title=item.get("title", ""),
-                url=item.get("url", ""),
-                description=item.get("description", ""),
-                age=item.get("age", ""),
-            ))
+            results.append(
+                SearchResult(
+                    title=item.get("title", ""),
+                    url=item.get("url", ""),
+                    description=item.get("description", ""),
+                    age=item.get("age", ""),
+                )
+            )
 
         news = []
         for item in data.get("news", {}).get("results", []):
-            news.append(SearchResult(
-                title=item.get("title", ""),
-                url=item.get("url", ""),
-                description=item.get("description", ""),
-                age=item.get("age", ""),
-            ))
+            news.append(
+                SearchResult(
+                    title=item.get("title", ""),
+                    url=item.get("url", ""),
+                    description=item.get("description", ""),
+                    age=item.get("age", ""),
+                )
+            )
 
         logger.info("brave_search", query=query, results=len(results), news=len(news))
         return BraveSearchResponse(query=query, results=results, news=news)

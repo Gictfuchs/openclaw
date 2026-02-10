@@ -1,6 +1,6 @@
 """Token budget tracker - prevents runaway API costs."""
 
-from datetime import date, datetime
+from datetime import date
 from typing import Any
 
 import structlog

@@ -72,9 +72,11 @@ class TestRSSClient:
             request=httpx.Request("GET", "https://example.com/feed"),
         )
 
-        with patch.object(rss_client._http, "get", new_callable=AsyncMock, return_value=mock_response):
-            with pytest.raises(httpx.HTTPStatusError):
-                await rss_client.fetch_feed("https://example.com/feed")
+        with (
+            patch.object(rss_client._http, "get", new_callable=AsyncMock, return_value=mock_response),
+            pytest.raises(httpx.HTTPStatusError),
+        ):
+            await rss_client.fetch_feed("https://example.com/feed")
 
 
 class TestCheckFeedTool:
@@ -105,7 +107,9 @@ class TestCheckFeedTool:
     async def test_empty_feed(self) -> None:
         mock_client = AsyncMock(spec=RSSClient)
         mock_client.fetch_feed.return_value = FeedResult(
-            title="Empty Feed", url="https://empty.example.com/rss", entries=[],
+            title="Empty Feed",
+            url="https://empty.example.com/rss",
+            entries=[],
         )
 
         tool = CheckFeedTool(client=mock_client)

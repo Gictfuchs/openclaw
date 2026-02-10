@@ -18,9 +18,7 @@ class ReadEmailsTool(BaseTool):
     """Read recent emails from the inbox."""
 
     name = "read_emails"
-    description = (
-        "Read recent emails from the inbox. Returns subject, sender, date, and a preview of the body."
-    )
+    description = "Read recent emails from the inbox. Returns subject, sender, date, and a preview of the body."
     parameters: dict[str, Any] = {
         "type": "object",
         "properties": {

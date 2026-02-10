@@ -7,6 +7,7 @@ import structlog
 
 from openclaw.config import Settings
 from openclaw.core.agent import FochsAgent
+from openclaw.db.engine import close_db, init_db
 from openclaw.integrations.brave import BraveSearchClient
 from openclaw.integrations.email import EmailClient, EmailConfig
 from openclaw.integrations.github import GitHubClient
@@ -16,6 +17,8 @@ from openclaw.llm.gemini import GeminiLLM
 from openclaw.llm.grok import GrokLLM
 from openclaw.llm.ollama import OllamaLLM
 from openclaw.llm.router import LLMRouter
+from openclaw.memory.long_term import LongTermMemory
+from openclaw.memory.vector_store import VectorStore
 from openclaw.research.engine import ResearchEngine
 from openclaw.security.budget import TokenBudget
 from openclaw.security.logging import setup_secure_logging
@@ -23,6 +26,7 @@ from openclaw.telegram.bot import FochsTelegramBot
 from openclaw.tools.email_tools import ReadEmailsTool, SendEmailTool
 from openclaw.tools.github_tools import GitHubCreateIssueTool, GitHubIssuesTool, GitHubRepoTool
 from openclaw.tools.google_search import GoogleSearchTool
+from openclaw.tools.memory_tools import RecallMemoryTool, StoreMemoryTool
 from openclaw.tools.registry import ToolRegistry
 from openclaw.tools.rss_tools import CheckFeedTool
 from openclaw.tools.web_scrape import WebScrapeTool
@@ -42,6 +46,7 @@ class FochsApp:
         self.telegram: FochsTelegramBot | None = None
         self.budget: TokenBudget | None = None
         self.research: ResearchEngine | None = None
+        self.memory: LongTermMemory | None = None
         self._brave: BraveSearchClient | None = None
         self._gemini: GeminiLLM | None = None
         self._scraper: WebScrapeTool | None = None
@@ -118,12 +123,14 @@ class FochsApp:
             logger.info("tool_configured", tool="github")
 
         if self.settings.email_address and self.settings.email_imap_host:
-            email_client = EmailClient(EmailConfig(
-                address=self.settings.email_address,
-                password=self.settings.email_password.get_secret_value(),
-                imap_host=self.settings.email_imap_host,
-                smtp_host=self.settings.email_smtp_host,
-            ))
+            email_client = EmailClient(
+                EmailConfig(
+                    address=self.settings.email_address,
+                    password=self.settings.email_password.get_secret_value(),
+                    imap_host=self.settings.email_imap_host,
+                    smtp_host=self.settings.email_smtp_host,
+                )
+            )
             registry.register(ReadEmailsTool(client=email_client))
             if self.settings.email_smtp_host:
                 registry.register(SendEmailTool(client=email_client))
@@ -133,7 +140,7 @@ class FochsApp:
         registry.register(CheckFeedTool(client=rss_client))
         logger.info("tool_configured", tool="rss")
 
-        # TODO Phase 4: memory_tools
+        # Phase 4: Memory tools (registered after memory is initialized in start())
         # TODO Phase 5: scheduler_tools
         # TODO Phase 6: sub_agent_tools
 
@@ -166,6 +173,17 @@ class FochsApp:
         self.llm_router.budget = self.budget
         self.tools = self._setup_tools()
 
+        # Initialize database and memory
+        await init_db(self.settings.db_path)
+        vector_store = VectorStore(persist_dir=self.settings.chroma_path)
+        self.memory = LongTermMemory(vector_store=vector_store)
+        logger.info("memory_initialized", db=self.settings.db_path, vectors=self.settings.chroma_path)
+
+        # Register memory tools (needs memory to be initialized first)
+        self.tools.register(RecallMemoryTool(memory=self.memory))
+        self.tools.register(StoreMemoryTool(memory=self.memory))
+        logger.info("tool_configured", tool="memory")
+
         # Research engine (uses Brave + Gemini + Scraper)
         self.research = ResearchEngine(
             llm=self.llm_router,
@@ -178,6 +196,7 @@ class FochsApp:
             llm=self.llm_router,
             tools=self.tools,
             max_iterations=self.settings.max_iterations,
+            memory=self.memory,
         )
 
         # Check LLM availability
@@ -210,5 +229,6 @@ class FochsApp:
                 await self.telegram.app.updater.stop()  # type: ignore[union-attr]
                 await self.telegram.app.stop()
                 await self.telegram.app.shutdown()
+                await close_db()
         else:
             logger.error("no_telegram_token", msg="Set FOCHS_TELEGRAM_BOT_TOKEN in .env")

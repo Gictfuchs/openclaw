@@ -1,6 +1,6 @@
 """Tests for the research engine."""
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -58,7 +58,10 @@ class TestResearchEngine:
         self, mock_llm: AsyncMock, mock_brave: AsyncMock, mock_gemini: AsyncMock, mock_scraper: AsyncMock
     ) -> None:
         engine = ResearchEngine(
-            llm=mock_llm, brave=mock_brave, gemini=mock_gemini, scraper=mock_scraper,
+            llm=mock_llm,
+            brave=mock_brave,
+            gemini=mock_gemini,
+            scraper=mock_scraper,
         )
         result = await engine.research("test topic")
 
@@ -93,9 +96,7 @@ class TestResearchEngine:
         # Should still have Gemini content
         assert result.summary
 
-    async def test_format_includes_citations(
-        self, mock_llm: AsyncMock, mock_brave: AsyncMock
-    ) -> None:
+    async def test_format_includes_citations(self, mock_llm: AsyncMock, mock_brave: AsyncMock) -> None:
         engine = ResearchEngine(llm=mock_llm, brave=mock_brave)
         result = await engine.research("test")
         formatted = result.format()

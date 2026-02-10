@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import structlog
 
-from openclaw.integrations.github import GitHubClient
 from openclaw.tools.base import BaseTool
+
+if TYPE_CHECKING:
+    from openclaw.integrations.github import GitHubClient
 
 logger = structlog.get_logger()
 
@@ -60,10 +62,7 @@ class GitHubIssuesTool(BaseTool):
     """List issues for a GitHub repository."""
 
     name = "github_issues"
-    description = (
-        "List issues (and PRs) for a GitHub repository. "
-        "Returns title, state, author, and labels."
-    )
+    description = "List issues (and PRs) for a GitHub repository. Returns title, state, author, and labels."
     parameters: dict[str, Any] = {
         "type": "object",
         "properties": {
@@ -95,7 +94,8 @@ class GitHubIssuesTool(BaseTool):
         try:
             loop = asyncio.get_event_loop()
             issues = await loop.run_in_executor(
-                None, lambda: self._client.list_issues(repo_name, state=state, limit=limit),
+                None,
+                lambda: self._client.list_issues(repo_name, state=state, limit=limit),
             )
         except Exception as e:
             return f"Error fetching issues for '{repo_name}': {e}"
@@ -147,7 +147,8 @@ class GitHubCreateIssueTool(BaseTool):
         try:
             loop = asyncio.get_event_loop()
             issue = await loop.run_in_executor(
-                None, lambda: self._client.create_issue(repo_name, title=title, body=body),
+                None,
+                lambda: self._client.create_issue(repo_name, title=title, body=body),
             )
         except Exception as e:
             return f"Error creating issue in '{repo_name}': {e}"

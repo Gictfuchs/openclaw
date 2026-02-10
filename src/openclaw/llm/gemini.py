@@ -4,7 +4,7 @@ import structlog
 from google import genai
 from google.genai import types
 
-from openclaw.llm.base import BaseLLM, LLMResponse, TokenUsage, ToolCall
+from openclaw.llm.base import BaseLLM, LLMResponse, TokenUsage
 
 logger = structlog.get_logger()
 
@@ -93,7 +93,7 @@ class GeminiLLM(BaseLLM):
 
     async def is_available(self) -> bool:
         try:
-            response = await self.client.aio.models.generate_content(
+            await self.client.aio.models.generate_content(
                 model=self.model,
                 contents="ping",
                 config=types.GenerateContentConfig(max_output_tokens=10),

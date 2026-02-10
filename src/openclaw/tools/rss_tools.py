@@ -56,9 +56,6 @@ class CheckFeedTool(BaseTool):
         for i, entry in enumerate(feed.entries, 1):
             published = f" ({entry.published})" if entry.published else ""
             author = f" - {entry.author}" if entry.author else ""
-            parts.append(
-                f"{i}. [{entry.title}]({entry.url}){published}{author}\n"
-                f"   {entry.summary}\n"
-            )
+            parts.append(f"{i}. [{entry.title}]({entry.url}){published}{author}\n   {entry.summary}\n")
 
         return "\n".join(parts)

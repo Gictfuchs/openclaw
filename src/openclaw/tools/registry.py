@@ -1,6 +1,5 @@
 """Tool registry for discovering and executing tools."""
 
-import json
 from typing import Any
 
 import structlog

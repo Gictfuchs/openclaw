@@ -5,8 +5,8 @@ Orchestrates: Search -> Scrape -> Summarize with citation tracking.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import structlog
 
@@ -76,15 +76,25 @@ class ResearchEngine:
             try:
                 brave_results = await self.brave.search(query, count=8)
                 for r in brave_results.results:
-                    idx = citations.add(Citation(
-                        url=r.url, title=r.title, snippet=r.description, source_type="web",
-                    ))
+                    idx = citations.add(
+                        Citation(
+                            url=r.url,
+                            title=r.title,
+                            snippet=r.description,
+                            source_type="web",
+                        )
+                    )
                     content_parts.append(f"[{idx}] {r.title}: {r.description}")
 
                 for n in brave_results.news:
-                    idx = citations.add(Citation(
-                        url=n.url, title=n.title, snippet=n.description, source_type="news",
-                    ))
+                    idx = citations.add(
+                        Citation(
+                            url=n.url,
+                            title=n.title,
+                            snippet=n.description,
+                            source_type="news",
+                        )
+                    )
                     content_parts.append(f"[{idx}] (News) {n.title}: {n.description}")
 
             except Exception as e:
@@ -101,7 +111,7 @@ class ResearchEngine:
 
         # Step 3: Scrape top results for deeper content
         if self.scraper and citations.citations:
-            scrape_urls = [c.url for c in citations.citations[:self.max_scrape]]
+            scrape_urls = [c.url for c in citations.citations[: self.max_scrape]]
             for url in scrape_urls:
                 try:
                     scraped = await self.scraper.execute(url=url)

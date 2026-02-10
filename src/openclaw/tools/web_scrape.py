@@ -15,13 +15,15 @@ logger = structlog.get_logger()
 _MAX_CONTENT_LENGTH = 30_000
 
 # Blocked domains that should never be scraped
-_BLOCKED_DOMAINS = frozenset({
-    "localhost",
-    "127.0.0.1",
-    "0.0.0.0",
-    "169.254.169.254",  # AWS metadata
-    "metadata.google.internal",  # GCP metadata
-})
+_BLOCKED_DOMAINS = frozenset(
+    {
+        "localhost",
+        "127.0.0.1",
+        "0.0.0.0",
+        "169.254.169.254",  # AWS metadata
+        "metadata.google.internal",  # GCP metadata
+    }
+)
 
 # Request headers to look like a regular browser
 _HEADERS = {

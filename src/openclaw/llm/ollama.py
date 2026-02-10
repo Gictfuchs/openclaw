@@ -1,6 +1,5 @@
 """Ollama local LLM implementation for routine tasks."""
 
-import json
 from uuid import uuid4
 
 import httpx

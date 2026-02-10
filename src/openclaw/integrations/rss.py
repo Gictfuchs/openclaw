@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 
 import feedparser
 import httpx
@@ -59,16 +58,19 @@ class RSSClient:
             # Strip HTML tags from summary
             if "<" in summary:
                 import re
+
                 summary = re.sub(r"<[^>]+>", "", summary)
             summary = summary[:500]
 
-            entries.append(FeedEntry(
-                title=entry.get("title", ""),
-                url=entry.get("link", ""),
-                summary=summary,
-                published=entry.get("published", ""),
-                author=entry.get("author", ""),
-            ))
+            entries.append(
+                FeedEntry(
+                    title=entry.get("title", ""),
+                    url=entry.get("link", ""),
+                    summary=summary,
+                    published=entry.get("published", ""),
+                    author=entry.get("author", ""),
+                )
+            )
 
         feed_title = feed.feed.get("title", url)
         logger.info("rss_fetched", feed=feed_title, entries=len(entries))

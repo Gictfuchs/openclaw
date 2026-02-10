@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import email
 import email.utils
-from dataclasses import dataclass, field
-from datetime import datetime
+from dataclasses import dataclass
 from email.mime.text import MIMEText
 from typing import Any
 
@@ -81,15 +80,17 @@ class EmailClient:
                 body = self._extract_body(parsed)
                 is_read = b"\\Seen" in (msg_data[0] if isinstance(msg_data[0], bytes) else b"")
 
-                messages.append(EmailMessage(
-                    subject=self._decode_header(parsed.get("Subject", "")),
-                    sender=self._decode_header(parsed.get("From", "")),
-                    to=self._decode_header(parsed.get("To", "")),
-                    date=parsed.get("Date", ""),
-                    body=body[:5000],  # Limit body size
-                    uid=msg_id.decode() if isinstance(msg_id, bytes) else str(msg_id),
-                    is_read=is_read,
-                ))
+                messages.append(
+                    EmailMessage(
+                        subject=self._decode_header(parsed.get("Subject", "")),
+                        sender=self._decode_header(parsed.get("From", "")),
+                        to=self._decode_header(parsed.get("To", "")),
+                        date=parsed.get("Date", ""),
+                        body=body[:5000],  # Limit body size
+                        uid=msg_id.decode() if isinstance(msg_id, bytes) else str(msg_id),
+                        is_read=is_read,
+                    )
+                )
 
             await client.logout()
             return messages

@@ -81,12 +81,14 @@ class AgentLoop:
             if response.content:
                 assistant_content.append({"type": "text", "text": response.content})
             for call in response.tool_calls:
-                assistant_content.append({
-                    "type": "tool_use",
-                    "id": call.id,
-                    "name": call.name,
-                    "input": call.input,
-                })
+                assistant_content.append(
+                    {
+                        "type": "tool_use",
+                        "id": call.id,
+                        "name": call.name,
+                        "input": call.input,
+                    }
+                )
             messages.append({"role": "assistant", "content": assistant_content})
 
             # Execute each tool call
@@ -98,11 +100,13 @@ class AgentLoop:
                 yield ToolResultEvent(tool=call.name, output=result)
 
                 # Mark tool results as external data (trust boundary)
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": call.id,
-                    "content": _TRUST_PREFIX + result,
-                })
+                tool_results.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": call.id,
+                        "content": _TRUST_PREFIX + result,
+                    }
+                )
 
             messages.append({"role": "user", "content": tool_results})
 

@@ -7,9 +7,8 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
-from openclaw.llm.base import BaseLLM, LLMResponse
-
 if TYPE_CHECKING:
+    from openclaw.llm.base import BaseLLM, LLMResponse
     from openclaw.security.budget import TokenBudget
 
 logger = structlog.get_logger()
@@ -18,11 +17,11 @@ logger = structlog.get_logger()
 class TaskComplexity(Enum):
     """Task complexity determines which LLM to use."""
 
-    TRIVIAL = "trivial"      # Classification, filtering -> Ollama fast
-    SIMPLE = "simple"        # Summarization, simple Q&A -> Ollama default
-    COMPLEX = "complex"      # Reasoning, planning, tool use -> Claude
+    TRIVIAL = "trivial"  # Classification, filtering -> Ollama fast
+    SIMPLE = "simple"  # Summarization, simple Q&A -> Ollama default
+    COMPLEX = "complex"  # Reasoning, planning, tool use -> Claude
     WEB_SEARCH = "web_search"  # Google grounded search -> Gemini
-    SOCIAL = "social"        # X/Twitter analysis -> Grok
+    SOCIAL = "social"  # X/Twitter analysis -> Grok
 
 
 class LLMRouter:

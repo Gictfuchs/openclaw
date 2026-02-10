@@ -6,7 +6,6 @@ import time
 from typing import TYPE_CHECKING
 
 import structlog
-from telegram import Update
 from telegram.ext import (
     Application,
     ApplicationBuilder,
@@ -16,10 +15,12 @@ from telegram.ext import (
     filters,
 )
 
-from openclaw.core.agent import FochsAgent
 from openclaw.core.events import ErrorEvent, ResponseEvent, ToolCallEvent
 
 if TYPE_CHECKING:
+    from telegram import Update
+
+    from openclaw.core.agent import FochsAgent
     from openclaw.research.engine import ResearchEngine
 
 logger = structlog.get_logger()
@@ -52,9 +53,7 @@ class FochsTelegramBot:
         self.app.add_handler(CommandHandler("status", self.cmd_status))
         self.app.add_handler(CommandHandler("clear", self.cmd_clear))
         self.app.add_handler(CommandHandler("research", self.cmd_research))
-        self.app.add_handler(
-            MessageHandler(filters.TEXT & ~filters.COMMAND, self.on_message)
-        )
+        self.app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.on_message))
 
     def _is_authorized(self, user_id: int) -> bool:
         """Check if user is in the whitelist. Empty list = deny all."""

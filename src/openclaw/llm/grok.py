@@ -3,7 +3,7 @@
 import httpx
 import structlog
 
-from openclaw.llm.base import BaseLLM, LLMResponse, TokenUsage, ToolCall
+from openclaw.llm.base import BaseLLM, LLMResponse, TokenUsage
 
 logger = structlog.get_logger()
 

@@ -60,12 +60,22 @@ class TestGitHubIssuesTool:
     async def test_returns_issues(self, mock_gh_client: MagicMock) -> None:
         mock_gh_client.list_issues.return_value = [
             IssueInfo(
-                number=1, title="Bug fix", state="open", author="user1",
-                labels=["bug"], is_pr=False, url="https://github.com/owner/repo/issues/1",
+                number=1,
+                title="Bug fix",
+                state="open",
+                author="user1",
+                labels=["bug"],
+                is_pr=False,
+                url="https://github.com/owner/repo/issues/1",
             ),
             IssueInfo(
-                number=2, title="Add feature", state="open", author="user2",
-                labels=[], is_pr=True, url="https://github.com/owner/repo/pull/2",
+                number=2,
+                title="Add feature",
+                state="open",
+                author="user2",
+                labels=[],
+                is_pr=True,
+                url="https://github.com/owner/repo/pull/2",
             ),
         ]
 
@@ -94,7 +104,10 @@ class TestGitHubIssuesTool:
 class TestGitHubCreateIssueTool:
     async def test_creates_issue(self, mock_gh_client: MagicMock) -> None:
         mock_gh_client.create_issue.return_value = IssueInfo(
-            number=42, title="New issue", state="open", author="bot",
+            number=42,
+            title="New issue",
+            state="open",
+            author="bot",
             url="https://github.com/owner/repo/issues/42",
         )
 

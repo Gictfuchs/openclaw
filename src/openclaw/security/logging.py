@@ -12,7 +12,9 @@ _SENSITIVE_KEYS = re.compile(
 
 
 def _mask_sensitive_values(
-    logger: object, method_name: str, event_dict: dict,
+    logger: object,
+    method_name: str,
+    event_dict: dict,
 ) -> dict:
     """Structlog processor that masks values for sensitive-looking keys."""
     for key in list(event_dict.keys()):

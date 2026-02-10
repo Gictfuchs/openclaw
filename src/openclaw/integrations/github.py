@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from typing import TYPE_CHECKING
 
 import structlog
 from github import Auth, Github, GithubException
+
+if TYPE_CHECKING:
+    from datetime import datetime
 
 logger = structlog.get_logger()
 
@@ -78,16 +81,18 @@ class GitHubClient:
             issues = repo.get_issues(state=state, sort="updated", direction="desc")
             result = []
             for issue in issues[:limit]:
-                result.append(IssueInfo(
-                    number=issue.number,
-                    title=issue.title,
-                    state=issue.state,
-                    author=issue.user.login if issue.user else "unknown",
-                    created_at=issue.created_at,
-                    labels=[l.name for l in issue.labels],
-                    is_pr=issue.pull_request is not None,
-                    url=issue.html_url,
-                ))
+                result.append(
+                    IssueInfo(
+                        number=issue.number,
+                        title=issue.title,
+                        state=issue.state,
+                        author=issue.user.login if issue.user else "unknown",
+                        created_at=issue.created_at,
+                        labels=[label.name for label in issue.labels],
+                        is_pr=issue.pull_request is not None,
+                        url=issue.html_url,
+                    )
+                )
             return result
         except GithubException as e:
             logger.error("github_issues_error", repo=repo_name, error=str(e))

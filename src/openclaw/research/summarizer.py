@@ -6,10 +6,10 @@ from typing import TYPE_CHECKING
 
 import structlog
 
-from openclaw.llm.base import LLMResponse
 from openclaw.llm.router import TaskComplexity
 
 if TYPE_CHECKING:
+    from openclaw.llm.base import LLMResponse
     from openclaw.llm.router import LLMRouter
     from openclaw.research.citations import CitationCollection
 

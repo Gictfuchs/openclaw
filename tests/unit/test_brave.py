@@ -73,9 +73,11 @@ class TestBraveSearchClient:
             request=httpx.Request("GET", "https://api.search.brave.com/res/v1/web/search"),
         )
 
-        with patch.object(client._client, "get", new_callable=AsyncMock, return_value=mock_response):
-            with pytest.raises(httpx.HTTPStatusError):
-                await client.search("rate limited")
+        with (
+            patch.object(client._client, "get", new_callable=AsyncMock, return_value=mock_response),
+            pytest.raises(httpx.HTTPStatusError),
+        ):
+            await client.search("rate limited")
 
     async def test_search_count_capped_at_20(self, client: BraveSearchClient) -> None:
         mock_response = httpx.Response(
