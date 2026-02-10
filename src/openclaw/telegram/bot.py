@@ -1,6 +1,9 @@
 """Telegram bot setup and message handling."""
 
+from __future__ import annotations
+
 import time
+from typing import TYPE_CHECKING
 
 import structlog
 from telegram import Update
@@ -15,6 +18,9 @@ from telegram.ext import (
 
 from openclaw.core.agent import FochsAgent
 from openclaw.core.events import ErrorEvent, ResponseEvent, ToolCallEvent
+
+if TYPE_CHECKING:
+    from openclaw.research.engine import ResearchEngine
 
 logger = structlog.get_logger()
 
@@ -31,9 +37,11 @@ class FochsTelegramBot:
         token: str,
         agent: FochsAgent,
         allowed_users: list[int] | None = None,
+        research: ResearchEngine | None = None,
     ) -> None:
         self.agent = agent
         self.allowed_users = allowed_users or []
+        self.research = research
         self.app: Application = ApplicationBuilder().token(token).build()  # type: ignore[assignment]
         self._rate_tracker: dict[int, list[float]] = {}
         self._register_handlers()
@@ -43,6 +51,7 @@ class FochsTelegramBot:
         self.app.add_handler(CommandHandler("help", self.cmd_help))
         self.app.add_handler(CommandHandler("status", self.cmd_status))
         self.app.add_handler(CommandHandler("clear", self.cmd_clear))
+        self.app.add_handler(CommandHandler("research", self.cmd_research))
         self.app.add_handler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, self.on_message)
         )
@@ -90,6 +99,7 @@ class FochsTelegramBot:
             "/start - Begruessung\n"
             "/help - Diese Hilfe\n"
             "/status - Agent-Status anzeigen\n"
+            "/research <thema> - Tiefe Recherche\n"
             "/clear - Gespraechsverlauf loeschen\n\n"
             "Oder schreib einfach eine Nachricht!",
             parse_mode="Markdown",
@@ -141,6 +151,43 @@ class FochsTelegramBot:
 
         self.agent.clear_history(update.effective_user.id)
         await update.message.reply_text("Gespraechsverlauf geloescht.")
+
+    async def cmd_research(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /research <topic> command."""
+        if not update.effective_user or not update.message:
+            return
+        if not self._is_authorized(update.effective_user.id):
+            return
+        if self._is_rate_limited(update.effective_user.id):
+            await update.message.reply_text("Zu viele Nachrichten. Bitte warte kurz.")
+            return
+
+        if not self.research:
+            await update.message.reply_text("Research Engine ist nicht konfiguriert.")
+            return
+
+        # Extract topic from command arguments
+        topic = " ".join(context.args) if context.args else ""
+        if not topic:
+            await update.message.reply_text("Bitte gib ein Thema an: /research <thema>")
+            return
+
+        logger.info("research_command", user_id=update.effective_user.id, topic=topic)
+        await update.message.reply_text(f"Recherchiere: _{topic}_...", parse_mode="Markdown")
+        await update.message.chat.send_action("typing")
+
+        try:
+            result = await self.research.research(topic)
+            report = result.format()
+
+            for chunk in self._split_message(report):
+                try:
+                    await update.message.reply_text(chunk, parse_mode="Markdown")
+                except Exception:
+                    await update.message.reply_text(chunk)
+        except Exception as e:
+            logger.error("research_command_failed", error=str(e))
+            await update.message.reply_text(f"Recherche fehlgeschlagen: {e}")
 
     async def on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle free-form text messages."""

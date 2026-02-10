@@ -7,15 +7,20 @@ import structlog
 
 from openclaw.config import Settings
 from openclaw.core.agent import FochsAgent
+from openclaw.integrations.brave import BraveSearchClient
 from openclaw.llm.claude import ClaudeLLM
 from openclaw.llm.gemini import GeminiLLM
 from openclaw.llm.grok import GrokLLM
 from openclaw.llm.ollama import OllamaLLM
 from openclaw.llm.router import LLMRouter
+from openclaw.research.engine import ResearchEngine
 from openclaw.security.budget import TokenBudget
 from openclaw.security.logging import setup_secure_logging
 from openclaw.telegram.bot import FochsTelegramBot
+from openclaw.tools.google_search import GoogleSearchTool
 from openclaw.tools.registry import ToolRegistry
+from openclaw.tools.web_scrape import WebScrapeTool
+from openclaw.tools.web_search import WebSearchTool
 
 logger = structlog.get_logger()
 
@@ -30,6 +35,10 @@ class FochsApp:
         self.agent: FochsAgent | None = None
         self.telegram: FochsTelegramBot | None = None
         self.budget: TokenBudget | None = None
+        self.research: ResearchEngine | None = None
+        self._brave: BraveSearchClient | None = None
+        self._gemini: GeminiLLM | None = None
+        self._scraper: WebScrapeTool | None = None
 
     def _ensure_data_dirs(self) -> None:
         """Create data directories if they don't exist."""
@@ -62,6 +71,7 @@ class FochsApp:
                 api_key=self.settings.gemini_api_key.get_secret_value(),
                 model=self.settings.gemini_model,
             )
+            self._gemini = gemini
             logger.info("llm_provider_configured", provider="gemini", model=self.settings.gemini_model)
 
         if self.settings.xai_api_key.get_secret_value():
@@ -76,12 +86,27 @@ class FochsApp:
     def _setup_tools(self) -> ToolRegistry:
         """Initialize and register tools."""
         registry = ToolRegistry()
-        # Tools will be registered in later phases:
-        # - Phase 2: web_search, google_search, web_scrape, social_media
-        # - Phase 3: github, email, calendar, rss
-        # - Phase 4: memory_tools
-        # - Phase 5: scheduler_tools
-        # - Phase 6: sub_agent_tools
+
+        # Phase 2: Search & Research tools
+        brave_key = self.settings.brave_api_key.get_secret_value()
+        if brave_key:
+            self._brave = BraveSearchClient(api_key=brave_key)
+            registry.register(WebSearchTool(client=self._brave))
+            logger.info("tool_configured", tool="web_search")
+
+        if self._gemini:
+            registry.register(GoogleSearchTool(gemini=self._gemini))
+            logger.info("tool_configured", tool="google_search")
+
+        self._scraper = WebScrapeTool()
+        registry.register(self._scraper)
+        logger.info("tool_configured", tool="web_scrape")
+
+        # TODO Phase 3: github, email, calendar, rss
+        # TODO Phase 4: memory_tools
+        # TODO Phase 5: scheduler_tools
+        # TODO Phase 6: sub_agent_tools
+
         return registry
 
     async def start(self) -> None:
@@ -110,6 +135,15 @@ class FochsApp:
         self.llm_router = self._setup_llm()
         self.llm_router.budget = self.budget
         self.tools = self._setup_tools()
+
+        # Research engine (uses Brave + Gemini + Scraper)
+        self.research = ResearchEngine(
+            llm=self.llm_router,
+            brave=self._brave,
+            gemini=self._gemini,
+            scraper=self._scraper,
+        )
+
         self.agent = FochsAgent(
             llm=self.llm_router,
             tools=self.tools,
@@ -129,6 +163,7 @@ class FochsApp:
                 token=token,
                 agent=self.agent,
                 allowed_users=self.settings.telegram_allowed_users,
+                research=self.research,
             )
             logger.info("telegram_bot_starting")
             await self.telegram.app.initialize()
