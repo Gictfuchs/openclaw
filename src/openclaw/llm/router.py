@@ -1,11 +1,16 @@
 """Smart LLM router - routes requests to the optimal provider."""
 
+from __future__ import annotations
+
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import structlog
 
 from openclaw.llm.base import BaseLLM, LLMResponse
+
+if TYPE_CHECKING:
+    from openclaw.security.budget import TokenBudget
 
 logger = structlog.get_logger()
 
@@ -13,22 +18,22 @@ logger = structlog.get_logger()
 class TaskComplexity(Enum):
     """Task complexity determines which LLM to use."""
 
-    TRIVIAL = "trivial"      # Classification, filtering → Ollama fast
-    SIMPLE = "simple"        # Summarization, simple Q&A → Ollama default
-    COMPLEX = "complex"      # Reasoning, planning, tool use → Claude
-    WEB_SEARCH = "web_search"  # Google grounded search → Gemini
-    SOCIAL = "social"        # X/Twitter analysis → Grok
+    TRIVIAL = "trivial"      # Classification, filtering -> Ollama fast
+    SIMPLE = "simple"        # Summarization, simple Q&A -> Ollama default
+    COMPLEX = "complex"      # Reasoning, planning, tool use -> Claude
+    WEB_SEARCH = "web_search"  # Google grounded search -> Gemini
+    SOCIAL = "social"        # X/Twitter analysis -> Grok
 
 
 class LLMRouter:
     """Routes LLM requests to the optimal provider based on task type.
 
     Routing strategy:
-    - TRIVIAL/SIMPLE → Ollama (local, free)
-    - COMPLEX/tool_use → Claude (primary API)
-    - WEB_SEARCH → Gemini (Google Grounding)
-    - SOCIAL → Grok (X/Twitter)
-    - Fallback chain: Claude → Gemini → Ollama
+    - TRIVIAL/SIMPLE -> Ollama (local, free)
+    - COMPLEX/tool_use -> Claude (primary API)
+    - WEB_SEARCH -> Gemini (Google Grounding)
+    - SOCIAL -> Grok (X/Twitter)
+    - Fallback chain: Claude -> Gemini -> Ollama
     """
 
     def __init__(
@@ -42,6 +47,7 @@ class LLMRouter:
         self.ollama = ollama
         self.gemini = gemini
         self.grok = grok
+        self.budget: TokenBudget | None = None
         self._provider_map = {
             "claude": claude,
             "ollama": ollama,
@@ -60,6 +66,10 @@ class LLMRouter:
         preferred_provider: str | None = None,
     ) -> LLMResponse:
         """Route a request to the best available LLM."""
+        # Budget check
+        if self.budget and not self.budget.check_budget(max_tokens):
+            raise RuntimeError("Token budget exhausted")
+
         provider = self._select_provider(complexity, tools, preferred_provider)
 
         if provider is None:
@@ -73,17 +83,22 @@ class LLMRouter:
                 max_tokens=max_tokens,
                 temperature=temperature,
             )
+
+            # Record token usage
+            tokens_used = response.usage.total_tokens if response.usage else 0
+            if self.budget and tokens_used:
+                self.budget.record_usage(tokens_used, provider=provider.provider_name)
+
             logger.info(
                 "llm_response",
                 provider=provider.provider_name,
                 complexity=complexity.value,
-                tokens=response.usage.total_tokens if response.usage else 0,
+                tokens=tokens_used,
             )
             return response
 
         except Exception as e:
             logger.warning("llm_provider_failed", provider=provider.provider_name, error=str(e))
-            # Try fallback chain
             return await self._fallback(
                 messages=messages,
                 tools=tools,
@@ -100,17 +115,14 @@ class LLMRouter:
         preferred: str | None,
     ) -> BaseLLM | None:
         """Select the optimal LLM provider."""
-        # Explicit provider override
         if preferred and preferred in self._provider_map:
             provider = self._provider_map[preferred]
             if provider is not None:
                 return provider
 
-        # Tool use requires Claude (best tool use support)
         if tools:
             return self.claude or self.gemini
 
-        # Route by complexity
         match complexity:
             case TaskComplexity.TRIVIAL:
                 return self.ollama or self.claude
@@ -134,7 +146,7 @@ class LLMRouter:
         temperature: float,
         failed_provider: str,
     ) -> LLMResponse:
-        """Try fallback providers in order: Claude → Gemini → Ollama."""
+        """Try fallback providers in order: Claude -> Gemini -> Ollama."""
         fallback_order = [self.claude, self.gemini, self.ollama]
 
         for provider in fallback_order:
@@ -142,13 +154,18 @@ class LLMRouter:
                 continue
             try:
                 logger.info("llm_fallback", provider=provider.provider_name)
-                return await provider.generate(
+                response = await provider.generate(
                     messages=messages,
                     tools=tools if provider.provider_name == "claude" else None,
                     system=system,
                     max_tokens=max_tokens,
                     temperature=temperature,
                 )
+                # Record fallback usage too
+                tokens_used = response.usage.total_tokens if response.usage else 0
+                if self.budget and tokens_used:
+                    self.budget.record_usage(tokens_used, provider=provider.provider_name)
+                return response
             except Exception as e:
                 logger.warning("llm_fallback_failed", provider=provider.provider_name, error=str(e))
                 continue

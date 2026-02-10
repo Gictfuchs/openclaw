@@ -1,5 +1,7 @@
 """Telegram bot setup and message handling."""
 
+import time
+
 import structlog
 from telegram import Update
 from telegram.ext import (
@@ -16,6 +18,10 @@ from openclaw.core.events import ErrorEvent, ResponseEvent, ToolCallEvent
 
 logger = structlog.get_logger()
 
+# Rate limit: max messages per user per minute
+_RATE_LIMIT = 10
+_RATE_WINDOW = 60.0
+
 
 class FochsTelegramBot:
     """Telegram bot interface for Fochs."""
@@ -29,6 +35,7 @@ class FochsTelegramBot:
         self.agent = agent
         self.allowed_users = allowed_users or []
         self.app: Application = ApplicationBuilder().token(token).build()  # type: ignore[assignment]
+        self._rate_tracker: dict[int, list[float]] = {}
         self._register_handlers()
 
     def _register_handlers(self) -> None:
@@ -41,21 +48,34 @@ class FochsTelegramBot:
         )
 
     def _is_authorized(self, user_id: int) -> bool:
-        """Check if user is authorized."""
+        """Check if user is in the whitelist. Empty list = deny all."""
         if not self.allowed_users:
-            return True  # No whitelist = allow all
+            return False
         return user_id in self.allowed_users
+
+    def _is_rate_limited(self, user_id: int) -> bool:
+        """Check if user has exceeded rate limit."""
+        now = time.monotonic()
+        timestamps = self._rate_tracker.get(user_id, [])
+        timestamps = [t for t in timestamps if now - t < _RATE_WINDOW]
+        if len(timestamps) >= _RATE_LIMIT:
+            self._rate_tracker[user_id] = timestamps
+            return True
+        timestamps.append(now)
+        self._rate_tracker[user_id] = timestamps
+        return False
 
     async def cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.effective_user or not update.message:
             return
         if not self._is_authorized(update.effective_user.id):
+            logger.warning("unauthorized_access", user_id=update.effective_user.id)
             return
 
         await update.message.reply_text(
-            "Hallo! Ich bin *Fochs*, dein autonomer KI-Agent. 🦊\n\n"
+            "Hallo! Ich bin *Fochs*, dein autonomer KI-Agent.\n\n"
             "Schreib mir einfach eine Nachricht und ich helfe dir.\n"
-            "Nutze /help für verfügbare Befehle.",
+            "Nutze /help fuer verfuegbare Befehle.",
             parse_mode="Markdown",
         )
 
@@ -66,11 +86,11 @@ class FochsTelegramBot:
             return
 
         await update.message.reply_text(
-            "*Verfügbare Befehle:*\n\n"
-            "/start - Begrüßung\n"
+            "*Verfuegbare Befehle:*\n\n"
+            "/start - Begruessung\n"
             "/help - Diese Hilfe\n"
             "/status - Agent-Status anzeigen\n"
-            "/clear - Gesprächsverlauf löschen\n\n"
+            "/clear - Gespraechsverlauf loeschen\n\n"
             "Oder schreib einfach eine Nachricht!",
             parse_mode="Markdown",
         )
@@ -86,18 +106,30 @@ class FochsTelegramBot:
         providers = status.get("llm_providers", {})
         provider_lines = []
         for name, available in providers.items():
-            icon = "✅" if available else "❌"
+            icon = "+" if available else "-"
             provider_lines.append(f"  {icon} {name}")
 
         tools = status.get("tools", [])
         tools_text = ", ".join(tools) if tools else "keine"
 
+        budget = status.get("budget", {})
+        budget_text = ""
+        if budget:
+            budget_text = (
+                f"\n\n*Budget:*\n"
+                f"  Heute: {budget.get('daily_usage', 0):,} / {budget.get('daily_limit', 0):,} tokens\n"
+                f"  Monat: {budget.get('monthly_usage', 0):,} / {budget.get('monthly_limit', 0):,} tokens"
+            )
+            if budget.get("killed"):
+                budget_text += "\n  KILL SWITCH AKTIV"
+
         text = (
             f"*Fochs Status*\n\n"
             f"Status: {status.get('status', 'unknown')}\n"
-            f"Aktive Gespräche: {status.get('active_conversations', 0)}\n\n"
+            f"Aktive Gespraeche: {status.get('active_conversations', 0)}\n\n"
             f"*LLM Provider:*\n" + "\n".join(provider_lines) + "\n\n"
             f"*Tools:* {tools_text}"
+            f"{budget_text}"
         )
         await update.message.reply_text(text, parse_mode="Markdown")
 
@@ -108,7 +140,7 @@ class FochsTelegramBot:
             return
 
         self.agent.clear_history(update.effective_user.id)
-        await update.message.reply_text("Gesprächsverlauf gelöscht. ✨")
+        await update.message.reply_text("Gespraechsverlauf geloescht.")
 
     async def on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle free-form text messages."""
@@ -117,6 +149,10 @@ class FochsTelegramBot:
 
         user_id = update.effective_user.id
         if not self._is_authorized(user_id):
+            return
+
+        if self._is_rate_limited(user_id):
+            await update.message.reply_text("Zu viele Nachrichten. Bitte warte kurz.")
             return
 
         logger.info("telegram_message", user_id=user_id, text_length=len(update.message.text))
@@ -130,26 +166,24 @@ class FochsTelegramBot:
 
         async for event in self.agent.process(update.message.text, user_id):
             if isinstance(event, ToolCallEvent):
-                tool_notifications.append(f"🔧 _{event.tool}_")
+                tool_notifications.append(f"Tool: {event.tool}")
             elif isinstance(event, ResponseEvent):
                 response_parts.append(event.content)
             elif isinstance(event, ErrorEvent):
-                response_parts.append(f"⚠️ {event.message}")
+                response_parts.append(f"Fehler: {event.message}")
 
         # Send tool usage notification if tools were used
         if tool_notifications:
             tools_text = "\n".join(tool_notifications)
-            await update.message.reply_text(tools_text, parse_mode="Markdown")
+            await update.message.reply_text(tools_text)
 
         # Send the main response
         full_response = "\n".join(response_parts)
         if full_response:
-            # Split long messages (Telegram limit: 4096 chars)
             for chunk in self._split_message(full_response):
                 try:
                     await update.message.reply_text(chunk, parse_mode="Markdown")
                 except Exception:
-                    # Fallback without markdown if parsing fails
                     await update.message.reply_text(chunk)
 
     @staticmethod
@@ -163,7 +197,6 @@ class FochsTelegramBot:
             if len(text) <= max_length:
                 chunks.append(text)
                 break
-            # Try to split at a newline
             split_at = text.rfind("\n", 0, max_length)
             if split_at == -1:
                 split_at = max_length
@@ -173,6 +206,9 @@ class FochsTelegramBot:
 
     async def send_proactive_message(self, user_id: int, text: str) -> None:
         """Send a message to a user without them initiating."""
+        if not self._is_authorized(user_id):
+            logger.warning("proactive_unauthorized", user_id=user_id)
+            return
         try:
             await self.app.bot.send_message(
                 chat_id=user_id,

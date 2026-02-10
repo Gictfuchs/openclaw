@@ -12,6 +12,8 @@ from openclaw.llm.gemini import GeminiLLM
 from openclaw.llm.grok import GrokLLM
 from openclaw.llm.ollama import OllamaLLM
 from openclaw.llm.router import LLMRouter
+from openclaw.security.budget import TokenBudget
+from openclaw.security.logging import setup_secure_logging
 from openclaw.telegram.bot import FochsTelegramBot
 from openclaw.tools.registry import ToolRegistry
 
@@ -27,25 +29,12 @@ class FochsApp:
         self.tools: ToolRegistry | None = None
         self.agent: FochsAgent | None = None
         self.telegram: FochsTelegramBot | None = None
+        self.budget: TokenBudget | None = None
 
     def _ensure_data_dirs(self) -> None:
         """Create data directories if they don't exist."""
         for path in [self.settings.data_dir, self.settings.chroma_path, self.settings.log_dir]:
             Path(path).mkdir(parents=True, exist_ok=True)
-
-    def _setup_logging(self) -> None:
-        """Configure structured logging."""
-        structlog.configure(
-            processors=[
-                structlog.contextvars.merge_contextvars,
-                structlog.processors.add_log_level,
-                structlog.processors.TimeStamper(fmt="iso"),
-                structlog.dev.ConsoleRenderer(),
-            ],
-            wrapper_class=structlog.make_filtering_bound_logger(20),  # INFO level
-            context_class=dict,
-            logger_factory=structlog.PrintLoggerFactory(),
-        )
 
     def _setup_llm(self) -> LLMRouter:
         """Initialize LLM providers and router."""
@@ -54,9 +43,9 @@ class FochsApp:
         gemini = None
         grok = None
 
-        if self.settings.anthropic_api_key:
+        if self.settings.anthropic_api_key.get_secret_value():
             claude = ClaudeLLM(
-                api_key=self.settings.anthropic_api_key,
+                api_key=self.settings.anthropic_api_key.get_secret_value(),
                 model=self.settings.anthropic_model,
             )
             logger.info("llm_provider_configured", provider="claude", model=self.settings.anthropic_model)
@@ -68,16 +57,16 @@ class FochsApp:
             )
             logger.info("llm_provider_configured", provider="ollama", model=self.settings.ollama_default_model)
 
-        if self.settings.gemini_api_key:
+        if self.settings.gemini_api_key.get_secret_value():
             gemini = GeminiLLM(
-                api_key=self.settings.gemini_api_key,
+                api_key=self.settings.gemini_api_key.get_secret_value(),
                 model=self.settings.gemini_model,
             )
             logger.info("llm_provider_configured", provider="gemini", model=self.settings.gemini_model)
 
-        if self.settings.xai_api_key:
+        if self.settings.xai_api_key.get_secret_value():
             grok = GrokLLM(
-                api_key=self.settings.xai_api_key,
+                api_key=self.settings.xai_api_key.get_secret_value(),
                 model=self.settings.xai_model,
             )
             logger.info("llm_provider_configured", provider="grok", model=self.settings.xai_model)
@@ -97,13 +86,29 @@ class FochsApp:
 
     async def start(self) -> None:
         """Start the application."""
-        self._setup_logging()
+        setup_secure_logging()
         self._ensure_data_dirs()
 
         logger.info("fochs_starting", version="0.1.0")
 
+        # Startup security checks
+        if not self.settings.telegram_allowed_users:
+            logger.warning(
+                "security_warning",
+                msg="FOCHS_TELEGRAM_ALLOWED_USERS is empty - bot will reject all messages. "
+                "Set your Telegram user ID to allow access.",
+            )
+
+        # Setup token budget
+        self.budget = TokenBudget(
+            daily_limit=self.settings.daily_token_budget,
+            monthly_limit=self.settings.monthly_token_budget,
+            per_run_limit=self.settings.max_tokens_per_run,
+        )
+
         # Setup components
         self.llm_router = self._setup_llm()
+        self.llm_router.budget = self.budget
         self.tools = self._setup_tools()
         self.agent = FochsAgent(
             llm=self.llm_router,
@@ -118,9 +123,10 @@ class FochsApp:
             logger.info("llm_status", provider=provider, status=status)
 
         # Start Telegram bot
-        if self.settings.telegram_bot_token:
+        token = self.settings.telegram_bot_token.get_secret_value()
+        if token:
             self.telegram = FochsTelegramBot(
-                token=self.settings.telegram_bot_token,
+                token=token,
                 agent=self.agent,
                 allowed_users=self.settings.telegram_allowed_users,
             )
