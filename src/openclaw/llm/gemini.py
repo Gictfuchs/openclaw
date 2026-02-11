@@ -31,7 +31,19 @@ class GeminiLLM(BaseLLM):
         for msg in messages:
             role = "user" if msg["role"] == "user" else "model"
             content = msg.get("content", "")
-            if isinstance(content, str):
+            if isinstance(content, list):
+                # Flatten Claude-style tool_result/text blocks to plain text
+                text_parts = []
+                for part in content:
+                    if isinstance(part, dict) and part.get("type") == "tool_result":
+                        text_parts.append(f"[Tool Result]: {part.get('content', '')}")
+                    elif isinstance(part, dict) and part.get("type") == "text":
+                        text_parts.append(part.get("text", ""))
+                if text_parts:
+                    content = "\n".join(text_parts)
+                else:
+                    continue
+            if isinstance(content, str) and content:
                 contents.append(types.Content(role=role, parts=[types.Part(text=content)]))
 
         config = types.GenerateContentConfig(

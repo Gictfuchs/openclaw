@@ -178,25 +178,27 @@ class ClawHubClient:
         """
         skill_id = validate_id(skill_id, "skill_id")
         # Always run security check before installation
-        if self._auto_scan:
-            report = await self.get_security_report(skill_id)
+        report = await self.get_security_report(skill_id)
 
-            if report.on_blocklist:
-                msg = (
-                    f"BLOCKED: Skill '{report.skill_name}' is on the ClawHavoc blocklist. "
-                    f"Reason: {report.blocklist_reason}. Installation refused."
-                )
-                logger.error("clawhub_install_blocked", skill_id=skill_id, reason="blocklist")
-                return msg
+        if report.on_blocklist:
+            msg = (
+                f"BLOCKED: Skill '{report.skill_name}' is on the ClawHavoc blocklist. "
+                f"Reason: {report.blocklist_reason}. Installation refused."
+            )
+            logger.error("clawhub_install_blocked", skill_id=skill_id, reason="blocklist")
+            return msg
 
+        if not report.safe_to_install:
             if report.vt_scan and not report.vt_scan.is_safe:
                 msg = (
                     f"BLOCKED: Skill '{report.skill_name}' flagged by VirusTotal "
                     f"({report.vt_scan.positives}/{report.vt_scan.total} detections). "
                     f"Installation refused."
                 )
-                logger.error("clawhub_install_blocked", skill_id=skill_id, reason="virustotal")
-                return msg
+            else:
+                msg = f"BLOCKED: Skill '{report.skill_name}' could not be verified as safe. Installation refused."
+            logger.error("clawhub_install_blocked", skill_id=skill_id, reason="unsafe")
+            return msg
 
         # Proceed with installation
         try:
