@@ -46,10 +46,12 @@ class EmailClient:
 
     async def fetch_recent(self, folder: str = "INBOX", limit: int = 10) -> list[EmailMessage]:
         """Fetch recent emails from IMAP."""
+        import contextlib
+
         import aioimaplib
 
+        client = aioimaplib.IMAP4_SSL(host=self._config.imap_host, port=self._config.imap_port)
         try:
-            client = aioimaplib.IMAP4_SSL(host=self._config.imap_host, port=self._config.imap_port)
             await client.wait_hello_from_server()
             await client.login(self._config.address, self._config.password)
             await client.select(folder)
@@ -97,6 +99,9 @@ class EmailClient:
 
         except Exception as e:
             logger.error("email_fetch_error", error=str(e))
+            # Ensure IMAP connection is closed even on error
+            with contextlib.suppress(Exception):
+                await client.logout()
             raise
 
     async def send(self, to: str, subject: str, body: str) -> None:

@@ -449,7 +449,14 @@ class FochsApp:
             # Close integration and LLM HTTP clients
             closeable = [self._brave, self._scraper, self._github, self._rss]
             if self.llm_router:
-                closeable.extend([self.llm_router.ollama, self.llm_router.grok])
+                closeable.extend(
+                    [
+                        self.llm_router.claude,
+                        self.llm_router.gemini,
+                        self.llm_router.ollama,
+                        self.llm_router.grok,
+                    ]
+                )
             for client in closeable:
                 if client and hasattr(client, "close"):
                     try:

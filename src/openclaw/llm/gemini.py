@@ -101,3 +101,8 @@ class GeminiLLM(BaseLLM):
             return True
         except Exception:
             return False
+
+    async def close(self) -> None:
+        # google-genai Client manages its own httpx connections
+        if hasattr(self.client, "close"):
+            self.client.close()
