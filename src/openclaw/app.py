@@ -23,7 +23,9 @@ from openclaw.research.engine import ResearchEngine
 from openclaw.scheduler.manager import SchedulerManager
 from openclaw.security.budget import TokenBudget
 from openclaw.security.logging import setup_secure_logging
+from openclaw.sub_agents.runner import SubAgentRunner
 from openclaw.telegram.bot import FochsTelegramBot
+from openclaw.tools.delegate_tool import DelegateTool
 from openclaw.tools.email_tools import ReadEmailsTool, SendEmailTool
 from openclaw.tools.github_tools import GitHubCreateIssueTool, GitHubIssuesTool, GitHubRepoTool
 from openclaw.tools.google_search import GoogleSearchTool
@@ -50,6 +52,7 @@ class FochsApp:
         self.research: ResearchEngine | None = None
         self.memory: LongTermMemory | None = None
         self.scheduler: SchedulerManager | None = None
+        self.sub_agent_runner: SubAgentRunner | None = None
         self._brave: BraveSearchClient | None = None
         self._gemini: GeminiLLM | None = None
         self._scraper: WebScrapeTool | None = None
@@ -153,7 +156,7 @@ class FochsApp:
         logger.info("tool_configured", tool="scheduler")
 
         # Phase 4: Memory tools (registered after memory is initialized in start())
-        # TODO Phase 6: sub_agent_tools
+        # Phase 6: Delegate tool (registered after sub-agent runner is initialized in start())
 
         return registry
 
@@ -194,6 +197,11 @@ class FochsApp:
         self.tools.register(RecallMemoryTool(memory=self.memory))
         self.tools.register(StoreMemoryTool(memory=self.memory))
         logger.info("tool_configured", tool="memory")
+
+        # Phase 6: Sub-agent runner + delegation tool
+        self.sub_agent_runner = SubAgentRunner(llm=self.llm_router, tools=self.tools)
+        self.tools.register(DelegateTool(runner=self.sub_agent_runner))
+        logger.info("tool_configured", tool="delegate")
 
         # Research engine (uses Brave + Gemini + Scraper)
         self.research = ResearchEngine(
