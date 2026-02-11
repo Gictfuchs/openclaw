@@ -1,5 +1,6 @@
 """SQLAlchemy async engine setup."""
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 _engine = None
@@ -23,7 +24,7 @@ async def init_db(db_path: str) -> None:
 
     async with _engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        await conn.execute(__import__("sqlalchemy").text("PRAGMA journal_mode=WAL"))
+        await conn.execute(text("PRAGMA journal_mode=WAL"))
 
 
 def get_session() -> AsyncSession:

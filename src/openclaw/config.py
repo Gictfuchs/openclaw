@@ -74,6 +74,32 @@ class Settings(BaseSettings):
     max_tokens_per_run: int = Field(default=50_000, ge=0)
     proactive_message_limit: int = Field(default=50, ge=0)
 
+    # --- Credential Vault (ClosedClaw) ---
+    closedclaw_vault_path: str = ""
+    closedclaw_backend: str = "vault-file"
+    closedclaw_unlock_timeout: int = Field(default=300, ge=30, le=3600)
+
+    # --- Composio (Brokered Credentials) ---
+    composio_api_key: SecretStr = SecretStr("")
+    composio_base_url: str = "https://backend.composio.dev/api/v2"
+
+    # --- ClawHub (Skill Marketplace) ---
+    clawhub_api_key: SecretStr = SecretStr("")
+    clawhub_base_url: str = "https://api.clawhub.ai/v1"
+    clawhub_auto_scan: bool = True
+
+    # --- VirusTotal (Security Scanning) ---
+    virustotal_api_key: SecretStr = SecretStr("")
+
+    # --- Honcho (Memory Layer) ---
+    honcho_api_key: SecretStr = SecretStr("")
+    honcho_base_url: str = "https://api.honcho.dev/v1"
+    honcho_app_id: str = ""
+
+    # --- AgentMail (Agent Email API) ---
+    agentmail_api_key: SecretStr = SecretStr("")
+    agentmail_base_url: str = "https://api.agentmail.to/v1"
+
     @field_validator("shell_allowed_dirs")
     @classmethod
     def validate_allowed_dirs(cls, v: list[str]) -> list[str]:

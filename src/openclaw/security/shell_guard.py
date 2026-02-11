@@ -68,8 +68,8 @@ _RESTRICTED_ALLOWLIST: set[str] = {
     "hostname",
     "whoami",
     "id",
-    "env",
-    "printenv",
+    # NOTE: env and printenv REMOVED — they leak all environment variables
+    # including API keys, tokens, and passwords loaded from .env
     "date",
     "cal",
     # Process info

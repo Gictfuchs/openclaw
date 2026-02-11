@@ -42,6 +42,8 @@ from openclaw.tools.web_scrape import WebScrapeTool
 from openclaw.tools.web_search import WebSearchTool
 from openclaw.web.server import start_web_server
 
+# Phase 9: Ecosystem integrations (conditionally imported below)
+
 logger = structlog.get_logger()
 
 
@@ -183,6 +185,124 @@ class FochsApp:
             tool="shell_suite",
             mode=self.settings.shell_mode,
         )
+
+        # Phase 9: Ecosystem integrations
+
+        # ClosedClaw Credential Vault
+        if self.settings.closedclaw_vault_path:
+            from openclaw.integrations.closedclaw import ClosedClawClient
+            from openclaw.tools.credential_tools import (
+                CredentialListTool,
+                CredentialStatusTool,
+                CredentialStoreTool,
+            )
+
+            vault_client = ClosedClawClient(
+                vault_path=self.settings.closedclaw_vault_path,
+                backend=self.settings.closedclaw_backend,
+                unlock_timeout=self.settings.closedclaw_unlock_timeout,
+            )
+            vault_client.unlock()
+            registry.register(CredentialListTool(client=vault_client), core=True)
+            registry.register(CredentialStoreTool(client=vault_client), core=True)
+            registry.register(CredentialStatusTool(client=vault_client), core=True)
+            logger.info("tool_configured", tool="credential_vault")
+
+        # Composio Brokered Execution
+        composio_key = self.settings.composio_api_key.get_secret_value()
+        if composio_key:
+            from openclaw.integrations.composio import ComposioClient
+            from openclaw.tools.composio_tools import (
+                ComposioActionsTool,
+                ComposioAppsTool,
+                ComposioExecuteTool,
+            )
+
+            composio_client = ComposioClient(
+                api_key=composio_key,
+                base_url=self.settings.composio_base_url,
+            )
+            registry.register(ComposioAppsTool(client=composio_client), core=True)
+            registry.register(ComposioActionsTool(client=composio_client), core=True)
+            registry.register(ComposioExecuteTool(client=composio_client), core=True)
+            logger.info("tool_configured", tool="composio")
+
+        # ClawHub + VirusTotal
+        clawhub_key = self.settings.clawhub_api_key.get_secret_value()
+        if clawhub_key:
+            from openclaw.integrations.clawhub import ClawHubClient
+            from openclaw.integrations.virustotal import VirusTotalClient
+            from openclaw.tools.clawhub_tools import (
+                ClawHubInstallTool,
+                ClawHubSearchTool,
+                ClawHubSecurityTool,
+            )
+
+            vt_client = None
+            vt_key = self.settings.virustotal_api_key.get_secret_value()
+            if vt_key:
+                vt_client = VirusTotalClient(api_key=vt_key)
+
+            clawhub_client = ClawHubClient(
+                api_key=clawhub_key,
+                base_url=self.settings.clawhub_base_url,
+                virustotal=vt_client,
+                auto_scan=self.settings.clawhub_auto_scan,
+            )
+            registry.register(ClawHubSearchTool(client=clawhub_client), core=True)
+            registry.register(ClawHubSecurityTool(client=clawhub_client), core=True)
+            # Install tool only if VT key present OR auto_scan disabled
+            if vt_key or not self.settings.clawhub_auto_scan:
+                registry.register(ClawHubInstallTool(client=clawhub_client), core=True)
+            else:
+                logger.warning(
+                    "clawhub_install_disabled",
+                    msg="ClawHub install tool disabled: set FOCHS_VIRUSTOTAL_API_KEY or FOCHS_CLAWHUB_AUTO_SCAN=false",
+                )
+            logger.info("tool_configured", tool="clawhub", vt_enabled=bool(vt_key))
+
+        # Honcho Memory Layer
+        honcho_key = self.settings.honcho_api_key.get_secret_value()
+        if honcho_key and self.settings.honcho_app_id:
+            from openclaw.integrations.honcho import HonchoClient
+            from openclaw.tools.honcho_tools import (
+                HonchoContextTool,
+                HonchoQueryTool,
+                HonchoRememberTool,
+                HonchoSessionTool,
+            )
+
+            honcho_client = HonchoClient(
+                api_key=honcho_key,
+                app_id=self.settings.honcho_app_id,
+                base_url=self.settings.honcho_base_url,
+            )
+            registry.register(HonchoContextTool(client=honcho_client), core=True)
+            registry.register(HonchoRememberTool(client=honcho_client), core=True)
+            registry.register(HonchoQueryTool(client=honcho_client), core=True)
+            registry.register(HonchoSessionTool(client=honcho_client), core=True)
+            logger.info("tool_configured", tool="honcho")
+
+        # AgentMail (separate from user's personal email)
+        agentmail_key = self.settings.agentmail_api_key.get_secret_value()
+        if agentmail_key:
+            from openclaw.integrations.agentmail import AgentMailClient
+            from openclaw.tools.agentmail_tools import (
+                AgentMailInboxTool,
+                AgentMailReadTool,
+                AgentMailSearchTool,
+                AgentMailSendTool,
+            )
+
+            agentmail_client = AgentMailClient(
+                api_key=agentmail_key,
+                base_url=self.settings.agentmail_base_url,
+            )
+            registry.register(AgentMailInboxTool(client=agentmail_client), core=True)
+            registry.register(AgentMailReadTool(client=agentmail_client), core=True)
+            registry.register(AgentMailSendTool(client=agentmail_client), core=True)
+            registry.register(AgentMailSearchTool(client=agentmail_client), core=True)
+            logger.info("tool_configured", tool="agentmail")
 
         # Phase 4: Memory tools (registered after memory is initialized in start())
         # Phase 6: Delegate tool (registered after sub-agent runner is initialized in start())

@@ -34,6 +34,8 @@ dependencies = [
     # Logging
     "structlog>=24.0.0",
     "itsdangerous>=2.2.0",
+    # Credential Vault (ClosedClaw)
+    "cryptography>=43.0.0",
 ]
 
 [project.optional-dependencies]
