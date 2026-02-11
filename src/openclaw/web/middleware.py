@@ -1,0 +1,59 @@
+"""Rate-limiting middleware for the web dashboard."""
+
+from __future__ import annotations
+
+import time
+from collections import defaultdict
+from typing import TYPE_CHECKING
+
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse, Response
+
+if TYPE_CHECKING:
+    from starlette.requests import Request
+
+
+class RateLimitMiddleware(BaseHTTPMiddleware):
+    """Simple in-memory rate limiting by IP address.
+
+    Exempt paths: /api/health, /static/*
+    Default: 60 requests per minute per IP.
+    """
+
+    def __init__(
+        self,
+        app: object,
+        requests_per_minute: int = 60,
+        exempt_prefixes: tuple[str, ...] = ("/api/health", "/static/"),
+    ) -> None:
+        super().__init__(app)  # type: ignore[arg-type]
+        self._rpm = requests_per_minute
+        self._exempt = exempt_prefixes
+        self._window: dict[str, list[float]] = defaultdict(list)
+
+    async def dispatch(self, request: Request, call_next: object) -> Response:  # type: ignore[override]
+        """Check rate limit before processing request."""
+        path = request.url.path
+
+        # Exempt paths
+        for prefix in self._exempt:
+            if path.startswith(prefix):
+                return await call_next(request)  # type: ignore[misc]
+
+        # Get client IP
+        client_ip = request.client.host if request.client else "unknown"
+        now = time.monotonic()
+        window_start = now - 60.0
+
+        # Clean old entries and count recent requests
+        timestamps = self._window[client_ip]
+        timestamps[:] = [t for t in timestamps if t > window_start]
+
+        if len(timestamps) >= self._rpm:
+            return JSONResponse(
+                {"error": "Rate limit exceeded", "retry_after_seconds": 60},
+                status_code=429,
+            )
+
+        timestamps.append(now)
+        return await call_next(request)  # type: ignore[misc]

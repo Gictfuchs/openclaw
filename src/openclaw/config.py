@@ -59,6 +59,12 @@ class Settings(BaseSettings):
     max_iterations: int = 10
     data_dir: str = "./data"
 
+    # --- Shell / Maschinenautonomie ---
+    shell_mode: str = "restricted"  # restricted, standard, unrestricted
+    shell_timeout: int = 30  # Sekunden (max 300)
+    shell_allowed_dirs: list[str] = Field(default_factory=lambda: ["/opt/fochs", "/tmp/fochs"])
+    plugins_dir: str = "./plugins"
+
     # --- Security / Budget ---
     daily_token_budget: int = 500_000  # Max tokens per day across all providers
     monthly_token_budget: int = 10_000_000

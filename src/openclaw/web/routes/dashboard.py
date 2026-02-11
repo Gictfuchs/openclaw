@@ -48,3 +48,11 @@ async def chat_page(request: Request) -> HTMLResponse | RedirectResponse:
     if not is_authenticated(request):
         return RedirectResponse(url="/login", status_code=303)
     return templates.TemplateResponse(request, "chat.html")
+
+
+@router.get("/settings", response_class=HTMLResponse, response_model=None)
+async def settings_page(request: Request) -> HTMLResponse | RedirectResponse:
+    if not is_authenticated(request):
+        return RedirectResponse(url="/login", status_code=303)
+    settings = request.app.state.settings
+    return templates.TemplateResponse(request, "settings.html", {"settings": settings})

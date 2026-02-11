@@ -42,3 +42,31 @@ async def get_status(request: Request) -> JSONResponse | HTMLResponse:
     if "text/html" in accept:
         return templates.TemplateResponse(request, "partials/status.html", {"status": status})
     return JSONResponse(status)
+
+
+@router.get("/health")
+async def health_check(request: Request) -> JSONResponse:
+    """Health check endpoint (unauthenticated).
+
+    Returns 200 if healthy, 503 if degraded.
+    """
+    fochs: dict[str, Any] = request.app.state.fochs
+    agent = fochs.get("agent")
+
+    checks: dict[str, bool] = {"agent": agent is not None}
+
+    # Check LLM availability
+    if agent:
+        try:
+            availability = await agent.llm.check_availability()
+            checks["llm"] = any(availability.values())
+        except Exception:
+            checks["llm"] = False
+    else:
+        checks["llm"] = False
+
+    healthy = all(checks.values())
+    return JSONResponse(
+        {"status": "healthy" if healthy else "degraded", "checks": checks},
+        status_code=200 if healthy else 503,
+    )

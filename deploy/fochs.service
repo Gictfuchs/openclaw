@@ -1,0 +1,36 @@
+[Unit]
+Description=Fochs - Autonomer KI-Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=fochs
+Group=fochs
+WorkingDirectory=/opt/fochs
+EnvironmentFile=/opt/fochs/.env
+
+ExecStart=/opt/fochs/.venv/bin/python -m openclaw
+Restart=on-failure
+RestartSec=10
+WatchdogSec=120
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=fochs
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+ReadWritePaths=/opt/fochs/data /opt/fochs/plugins /tmp/fochs
+
+# Resource limits
+LimitNOFILE=65535
+MemoryMax=2G
+CPUQuota=200%
+
+[Install]
+WantedBy=multi-user.target

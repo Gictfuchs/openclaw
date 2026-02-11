@@ -1,0 +1,18 @@
+services:
+  fochs:
+    build: .
+    container_name: fochs
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/opt/fochs/data
+      - ./plugins:/opt/fochs/plugins
+      - ./.env:/opt/fochs/.env:ro
+    environment:
+      - FOCHS_WEB_HOST=0.0.0.0
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

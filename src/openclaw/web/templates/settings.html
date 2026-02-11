@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Fochs - Settings{% endblock %}
+
+{% block content %}
+<h1>Settings</h1>
+
+<div class="status-grid">
+    <div class="status-card">
+        <h3>Shell-Modus</h3>
+        <dl>
+            <dt>Aktueller Modus</dt>
+            <dd>
+                {% if settings.shell_mode == "restricted" %}
+                    <span class="badge badge-ok">restricted</span>
+                {% elif settings.shell_mode == "standard" %}
+                    <span class="badge" style="background:rgba(224,160,64,0.15);color:var(--warn)">standard</span>
+                {% else %}
+                    <span class="badge badge-err">unrestricted</span>
+                {% endif %}
+            </dd>
+            <dt>Shell Timeout</dt>
+            <dd>{{ settings.shell_timeout }}s</dd>
+        </dl>
+    </div>
+
+    <div class="status-card">
+        <h3>Autonomie</h3>
+        <dl>
+            <dt>Autonomie-Level</dt>
+            <dd>{{ settings.autonomy_level }}</dd>
+            <dt>Max Iterationen</dt>
+            <dd>{{ settings.max_iterations }}</dd>
+        </dl>
+    </div>
+
+    <div class="status-card">
+        <h3>Budget</h3>
+        <dl>
+            <dt>Tages-Budget</dt>
+            <dd>{{ "{:,}".format(settings.daily_token_budget) }} Tokens</dd>
+            <dt>Monats-Budget</dt>
+            <dd>{{ "{:,}".format(settings.monthly_token_budget) }} Tokens</dd>
+            <dt>Pro Ausfuehrung</dt>
+            <dd>{{ "{:,}".format(settings.max_tokens_per_run) }} Tokens</dd>
+        </dl>
+    </div>
+
+    <div class="status-card">
+        <h3>Erlaubte Verzeichnisse</h3>
+        <div class="tool-list">
+            {% for d in settings.shell_allowed_dirs %}
+                <span class="tool-tag">{{ d }}</span>
+            {% endfor %}
+        </div>
+    </div>
+
+    <div class="status-card">
+        <h3>Plugins</h3>
+        <dl>
+            <dt>Plugin-Verzeichnis</dt>
+            <dd>{{ settings.plugins_dir }}</dd>
+        </dl>
+    </div>
+
+    <div class="status-card">
+        <h3>Web Dashboard</h3>
+        <dl>
+            <dt>Host</dt>
+            <dd>{{ settings.web_host }}</dd>
+            <dt>Port</dt>
+            <dd>{{ settings.web_port }}</dd>
+        </dl>
+    </div>
+</div>
+
+<p style="margin-top: 1.5rem; color: var(--text-dim); font-size: 0.85rem;">
+    Einstellungen werden ueber Umgebungsvariablen (FOCHS_*) oder die .env-Datei konfiguriert.
+    Aenderungen erfordern einen Neustart.
+</p>
+{% endblock %}

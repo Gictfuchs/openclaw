@@ -32,6 +32,19 @@ Du bist Fochs, ein autonomer KI-Agent. Du bist intelligent, neugierig und hilfre
   * 'summary' - Zusammenfassung langer Texte
   Nutze das 'delegate' Tool wenn eine Aufgabe spezialisierte Tiefe erfordert
 
+## Maschinenautonomie
+- Du kannst Shell-Befehle auf der Maschine ausfuehren (shell_execute Tool)
+- Du kannst Dateien lesen und schreiben (file_read, file_write Tools)
+- Du kannst dich selbst updaten (self_update Tool - fragt IMMER nach)
+- Du kannst neue Tools als Plugins schreiben und laden
+- Dein aktueller Shell-Modus bestimmt was erlaubt ist:
+  * restricted: Nur lesen (ls, cat, df, ps, git status, ...)
+  * standard: Allgemein (pip install, git pull, Dateien schreiben, ...)
+  * unrestricted: Volle Kontrolle (alles ausser absolute Blocklist)
+- Bei systemkritischen Aktionen: IMMER den User fragen, auch bei autonomy_level=full
+- Pruefe Befehle auf Korrektheit bevor du sie ausfuehrst
+- Logge was du tust - der User soll nachvollziehen koennen was passiert ist
+
 ## Deine Persoenlichkeit
 - Direkt und praezise, ohne unnoetiges Geschwaetz
 - Proaktiv: Du schlaegst naechste Schritte vor, wenn es sinnvoll ist
@@ -70,13 +83,32 @@ class FochsAgent:
         self.memory = memory
         self._conversations: dict[int, list[dict[str, Any]]] = {}
 
+    async def _ensure_history_loaded(self, user_id: int) -> list[dict[str, Any]]:
+        """Lazy-load conversation history from DB on first access for a user."""
+        if user_id in self._conversations:
+            return self._conversations[user_id]
+
+        # Load from long-term memory if available
+        if self.memory:
+            try:
+                recent = await self.memory.get_recent_messages(user_id, limit=50)
+                if recent:
+                    self._conversations[user_id] = recent
+                    logger.info("history_loaded_from_db", user_id=user_id, messages=len(recent))
+                    return recent
+            except Exception as e:
+                logger.warning("history_load_failed", user_id=user_id, error=str(e))
+
+        self._conversations[user_id] = []
+        return self._conversations[user_id]
+
     async def process(
         self,
         message: str,
         user_id: int,
     ) -> AsyncIterator[AgentEvent]:
         """Process a user message and yield agent events."""
-        history = self._conversations.get(user_id, [])
+        history = await self._ensure_history_loaded(user_id)
 
         loop = AgentLoop(
             llm=self.llm,

@@ -19,20 +19,25 @@ from openclaw.llm.ollama import OllamaLLM
 from openclaw.llm.router import LLMRouter
 from openclaw.memory.long_term import LongTermMemory
 from openclaw.memory.vector_store import VectorStore
+from openclaw.plugins.loader import PluginLoader
 from openclaw.research.engine import ResearchEngine
 from openclaw.scheduler.manager import SchedulerManager
 from openclaw.security.budget import TokenBudget
 from openclaw.security.logging import setup_secure_logging
+from openclaw.security.shell_guard import ShellGuard
 from openclaw.sub_agents.runner import SubAgentRunner
 from openclaw.telegram.bot import FochsTelegramBot
 from openclaw.tools.delegate_tool import DelegateTool
 from openclaw.tools.email_tools import ReadEmailsTool, SendEmailTool
+from openclaw.tools.file_tool import FileReadTool, FileWriteTool
 from openclaw.tools.github_tools import GitHubCreateIssueTool, GitHubIssuesTool, GitHubRepoTool
 from openclaw.tools.google_search import GoogleSearchTool
 from openclaw.tools.memory_tools import RecallMemoryTool, StoreMemoryTool
 from openclaw.tools.registry import ToolRegistry
 from openclaw.tools.rss_tools import CheckFeedTool
 from openclaw.tools.scheduler_tools import ListWatchesTool, UnwatchTool, WatchTool
+from openclaw.tools.self_update_tool import SelfUpdateTool
+from openclaw.tools.shell_tool import ShellExecuteTool
 from openclaw.tools.web_scrape import WebScrapeTool
 from openclaw.tools.web_search import WebSearchTool
 from openclaw.web.server import start_web_server
@@ -60,6 +65,8 @@ class FochsApp:
         self._github: GitHubClient | None = None
         self._email: EmailClient | None = None
         self._rss: RSSClient | None = None
+        self._shell_guard: ShellGuard | None = None
+        self._plugin_loader: PluginLoader | None = None
 
     def _ensure_data_dirs(self) -> None:
         """Create data directories if they don't exist."""
@@ -156,6 +163,26 @@ class FochsApp:
         registry.register(ListWatchesTool())
         logger.info("tool_configured", tool="scheduler")
 
+        # Phase 8: Shell, File, Self-Update tools
+        self._shell_guard = ShellGuard(
+            mode=self.settings.shell_mode,
+            allowed_dirs=self.settings.shell_allowed_dirs,
+        )
+        registry.register(
+            ShellExecuteTool(
+                guard=self._shell_guard,
+                default_timeout=self.settings.shell_timeout,
+            )
+        )
+        registry.register(FileReadTool(guard=self._shell_guard))
+        registry.register(FileWriteTool(guard=self._shell_guard))
+        registry.register(SelfUpdateTool(guard=self._shell_guard))
+        logger.info(
+            "tool_configured",
+            tool="shell_suite",
+            mode=self.settings.shell_mode,
+        )
+
         # Phase 4: Memory tools (registered after memory is initialized in start())
         # Phase 6: Delegate tool (registered after sub-agent runner is initialized in start())
 
@@ -203,6 +230,15 @@ class FochsApp:
         self.sub_agent_runner = SubAgentRunner(llm=self.llm_router, tools=self.tools)
         self.tools.register(DelegateTool(runner=self.sub_agent_runner))
         logger.info("tool_configured", tool="delegate")
+
+        # Phase 8: Plugin loader (hot-reload custom tools)
+        self._plugin_loader = PluginLoader(
+            plugins_dir=self.settings.plugins_dir,
+            registry=self.tools,
+        )
+        loaded_plugins = self._plugin_loader.scan_and_load()
+        if loaded_plugins:
+            logger.info("plugins_loaded", tools=loaded_plugins)
 
         # Research engine (uses Brave + Gemini + Scraper)
         self.research = ResearchEngine(

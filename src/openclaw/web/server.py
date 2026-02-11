@@ -23,6 +23,11 @@ def create_app(settings: Settings, app_state: dict[str, Any]) -> FastAPI:
     """Create and configure the FastAPI application."""
     web_app = FastAPI(title="Fochs Dashboard", docs_url=None, redoc_url=None)
 
+    # Rate limiting middleware (must be added before session middleware)
+    from openclaw.web.middleware import RateLimitMiddleware
+
+    web_app.add_middleware(RateLimitMiddleware, requests_per_minute=60)
+
     # Session middleware for cookie-based auth
     web_app.add_middleware(
         SessionMiddleware,
