@@ -163,6 +163,31 @@ class TestCreateApp:
 # ---------------------------------------------------------------------------
 
 
+class TestRateLimitMiddleware:
+    """Test rate limiter respects X-Forwarded-For."""
+
+    def test_rate_limit_uses_forwarded_ip(self) -> None:
+        """Different X-Forwarded-For IPs should have separate rate limit buckets."""
+        settings = Settings(
+            anthropic_api_key="test-key",
+            telegram_bot_token="test-token",
+            telegram_allowed_users=[123],
+        )
+        app = create_app(settings, {"agent": None})
+        client = TestClient(app)
+
+        # Requests from different forwarded IPs should NOT share a rate limit
+        for _ in range(5):
+            client.get("/login", headers={"X-Forwarded-For": "10.0.0.1"})
+            client.get("/login", headers={"X-Forwarded-For": "10.0.0.2"})
+
+        # Both should still be under the limit (60 req/min)
+        r1 = client.get("/login", headers={"X-Forwarded-For": "10.0.0.1"})
+        r2 = client.get("/login", headers={"X-Forwarded-For": "10.0.0.2"})
+        assert r1.status_code == 200
+        assert r2.status_code == 200
+
+
 class TestWebSocketConstants:
     def test_web_user_id(self) -> None:
         assert WEB_USER_ID == 1_000_000

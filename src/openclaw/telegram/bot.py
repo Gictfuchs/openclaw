@@ -254,8 +254,14 @@ class FochsTelegramBot:
             return
 
         sub_id = int(args[0])
+        user_id = update.effective_user.id
         async with get_session() as session:
-            result = await session.execute(select(WatchSubscription).where(WatchSubscription.id == sub_id))
+            result = await session.execute(
+                select(WatchSubscription).where(
+                    WatchSubscription.id == sub_id,
+                    WatchSubscription.user_id == user_id,
+                )
+            )
             sub = result.scalar_one_or_none()
             if not sub:
                 await update.message.reply_text(f"Watch #{sub_id} nicht gefunden.")

@@ -76,8 +76,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             if path.startswith(prefix):
                 return await call_next(request)  # type: ignore[misc]
 
-        # Get client IP
-        client_ip = request.client.host if request.client else "unknown"
+        # Get client IP (respect X-Forwarded-For behind reverse proxies)
+        forwarded = request.headers.get("x-forwarded-for", "")
+        if forwarded:
+            client_ip = forwarded.split(",")[0].strip()
+        else:
+            client_ip = request.client.host if request.client else "unknown"
         now = time.monotonic()
         window_start = now - 60.0
 
