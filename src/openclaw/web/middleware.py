@@ -48,7 +48,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
     Exempt paths: /api/health, /static/*
     Default: 60 requests per minute per IP.
+
+    Periodically cleans up stale IP entries to prevent memory leaks.
     """
+
+    # Clean up stale IPs every N requests
+    _CLEANUP_INTERVAL: int = 100
 
     def __init__(
         self,
@@ -60,6 +65,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self._rpm = requests_per_minute
         self._exempt = exempt_prefixes
         self._window: dict[str, list[float]] = defaultdict(list)
+        self._request_count: int = 0
 
     async def dispatch(self, request: Request, call_next: object) -> Response:  # type: ignore[override]
         """Check rate limit before processing request."""
@@ -74,6 +80,14 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         client_ip = request.client.host if request.client else "unknown"
         now = time.monotonic()
         window_start = now - 60.0
+
+        # Periodic cleanup of stale IPs to prevent memory leak
+        self._request_count += 1
+        if self._request_count >= self._CLEANUP_INTERVAL:
+            self._request_count = 0
+            stale_ips = [ip for ip, ts in self._window.items() if not ts or ts[-1] < window_start]
+            for ip in stale_ips:
+                del self._window[ip]
 
         # Clean old entries and count recent requests
         timestamps = self._window[client_ip]

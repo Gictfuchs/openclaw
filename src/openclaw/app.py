@@ -204,11 +204,13 @@ class FochsApp:
                 "Set your Telegram user ID to allow access.",
             )
 
-        # Setup token budget
+        # Setup token budget (with persistence across restarts)
+        budget_path = str(Path(self.settings.data_dir) / "budget_state.json")
         self.budget = TokenBudget(
             daily_limit=self.settings.daily_token_budget,
             monthly_limit=self.settings.monthly_token_budget,
             per_run_limit=self.settings.max_tokens_per_run,
+            persist_path=budget_path,
         )
 
         # Setup components
@@ -308,6 +310,8 @@ class FochsApp:
             start_web_server(self.settings, app_state),
             name="web_dashboard",
         )
+        # Log if the web task fails unexpectedly
+        web_task.add_done_callback(self._on_background_task_done)
 
         # Keep running
         try:
@@ -323,3 +327,17 @@ class FochsApp:
                 await self.telegram.app.stop()
                 await self.telegram.app.shutdown()
             await close_db()
+
+    @staticmethod
+    def _on_background_task_done(task: asyncio.Task[None]) -> None:
+        """Callback for background tasks — log exceptions instead of losing them."""
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc:
+            logger.error(
+                "background_task_failed",
+                task_name=task.get_name(),
+                error=str(exc),
+                exc_type=type(exc).__name__,
+            )

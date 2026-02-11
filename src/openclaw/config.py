@@ -2,8 +2,9 @@
 
 import secrets
 from pathlib import Path
+from typing import Literal
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -51,26 +52,35 @@ class Settings(BaseSettings):
 
     # --- Web Dashboard ---
     web_host: str = "127.0.0.1"
-    web_port: int = 8080
+    web_port: int = Field(default=8080, ge=1, le=65535)
     web_secret_key: SecretStr = Field(default_factory=lambda: SecretStr(secrets.token_hex(32)))
     debug: bool = False
 
     # --- Agent ---
-    autonomy_level: str = "full"  # full, ask, manual
-    max_iterations: int = 10
+    autonomy_level: Literal["full", "ask", "manual"] = "full"
+    max_iterations: int = Field(default=10, ge=1, le=100)
     data_dir: str = "./data"
 
     # --- Shell / Maschinenautonomie ---
-    shell_mode: str = "restricted"  # restricted, standard, unrestricted
-    shell_timeout: int = 30  # Sekunden (max 300)
+    shell_mode: Literal["restricted", "standard", "unrestricted"] = "restricted"
+    shell_timeout: int = Field(default=30, ge=1, le=300)
     shell_allowed_dirs: list[str] = Field(default_factory=lambda: ["/opt/fochs", "/tmp/fochs"])
     plugins_dir: str = "./plugins"
 
     # --- Security / Budget ---
-    daily_token_budget: int = 500_000  # Max tokens per day across all providers
-    monthly_token_budget: int = 10_000_000
-    max_tokens_per_run: int = 50_000  # Max tokens for a single agent run
-    proactive_message_limit: int = 50  # Max proactive messages per user per day
+    daily_token_budget: int = Field(default=500_000, ge=0)
+    monthly_token_budget: int = Field(default=10_000_000, ge=0)
+    max_tokens_per_run: int = Field(default=50_000, ge=0)
+    proactive_message_limit: int = Field(default=50, ge=0)
+
+    @field_validator("shell_allowed_dirs")
+    @classmethod
+    def validate_allowed_dirs(cls, v: list[str]) -> list[str]:
+        """Ensure at least one allowed directory is configured."""
+        if not v:
+            msg = "shell_allowed_dirs must contain at least one directory"
+            raise ValueError(msg)
+        return v
 
     @property
     def db_path(self) -> str:

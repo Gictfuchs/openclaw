@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
@@ -34,6 +35,9 @@ class LLMRouter:
     - SOCIAL -> Grok (X/Twitter)
     - Fallback chain: Claude -> Gemini -> Ollama
     """
+
+    # Timeout for a single LLM call (seconds)
+    LLM_CALL_TIMEOUT: int = 120
 
     def __init__(
         self,
@@ -75,12 +79,15 @@ class LLMRouter:
             raise RuntimeError("No LLM provider available")
 
         try:
-            response = await provider.generate(
-                messages=messages,
-                tools=tools,
-                system=system,
-                max_tokens=max_tokens,
-                temperature=temperature,
+            response = await asyncio.wait_for(
+                provider.generate(
+                    messages=messages,
+                    tools=tools,
+                    system=system,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                ),
+                timeout=self.LLM_CALL_TIMEOUT,
             )
 
             # Record token usage
@@ -96,6 +103,20 @@ class LLMRouter:
             )
             return response
 
+        except TimeoutError:
+            logger.warning(
+                "llm_provider_timeout",
+                provider=provider.provider_name,
+                timeout=self.LLM_CALL_TIMEOUT,
+            )
+            return await self._fallback(
+                messages=messages,
+                tools=tools,
+                system=system,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                failed_provider=provider.provider_name,
+            )
         except Exception as e:
             logger.warning("llm_provider_failed", provider=provider.provider_name, error=str(e))
             return await self._fallback(
@@ -153,19 +174,22 @@ class LLMRouter:
                 continue
             try:
                 logger.info("llm_fallback", provider=provider.provider_name)
-                response = await provider.generate(
-                    messages=messages,
-                    tools=tools if provider.provider_name == "claude" else None,
-                    system=system,
-                    max_tokens=max_tokens,
-                    temperature=temperature,
+                response = await asyncio.wait_for(
+                    provider.generate(
+                        messages=messages,
+                        tools=tools if provider.provider_name == "claude" else None,
+                        system=system,
+                        max_tokens=max_tokens,
+                        temperature=temperature,
+                    ),
+                    timeout=self.LLM_CALL_TIMEOUT,
                 )
                 # Record fallback usage too
                 tokens_used = response.usage.total_tokens if response.usage else 0
                 if self.budget and tokens_used:
                     self.budget.record_usage(tokens_used, provider=provider.provider_name)
                 return response
-            except Exception as e:
+            except (TimeoutError, Exception) as e:
                 logger.warning("llm_fallback_failed", provider=provider.provider_name, error=str(e))
                 continue
 

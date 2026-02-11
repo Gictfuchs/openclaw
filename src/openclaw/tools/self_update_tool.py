@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -14,6 +15,15 @@ if TYPE_CHECKING:
     from openclaw.security.shell_guard import ShellGuard
 
 logger = structlog.get_logger()
+
+
+@dataclasses.dataclass
+class CommandResult:
+    """Clean result from a subprocess command."""
+
+    returncode: int
+    stdout: str
+    stderr: str
 
 
 class SelfUpdateTool(BaseTool):
@@ -112,7 +122,13 @@ class SelfUpdateTool(BaseTool):
             return f"pip install fehlgeschlagen:\n{install_result.stderr}"
         steps.append("pip install: OK")
 
-        # Step 4: Restart (this will kill the current process)
+        # Step 4: Validate and execute restart
+        restart_error = self._guard.validate(self._restart_cmd)
+        if restart_error:
+            steps.append(f"Update OK, aber Restart blockiert: {restart_error}")
+            steps.append("Bitte manuell neustarten.")
+            return "\n".join(steps)
+
         steps.append(f"Neustart wird ausgefuehrt: {self._restart_cmd}")
         logger.info("self_update_restart", command=self._restart_cmd)
 
@@ -120,7 +136,9 @@ class SelfUpdateTool(BaseTool):
 
         # Fire and forget restart
         try:
-            parts = self._restart_cmd.split()
+            import shlex
+
+            parts = shlex.split(self._restart_cmd)
             await asyncio.create_subprocess_exec(
                 *parts,
                 stdout=asyncio.subprocess.DEVNULL,
@@ -151,8 +169,8 @@ class SelfUpdateTool(BaseTool):
         self,
         cmd: list[str],
         timeout: int = 30,
-    ) -> asyncio.subprocess.Process:
-        """Run a subprocess and return the completed process."""
+    ) -> CommandResult:
+        """Run a subprocess and return a clean result object."""
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
@@ -162,16 +180,11 @@ class SelfUpdateTool(BaseTool):
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
         except TimeoutError:
             proc.kill()
-            # Create a simple result object
-            proc.stdout_text = ""  # type: ignore[attr-defined]
-            proc.stderr_text = f"Timeout nach {timeout}s"  # type: ignore[attr-defined]
-            return proc
+            await proc.wait()
+            return CommandResult(returncode=-1, stdout="", stderr=f"Timeout nach {timeout}s")
 
-        # Attach decoded text to proc for easy access
-        proc.stdout_text = stdout.decode("utf-8", errors="replace") if stdout else ""  # type: ignore[attr-defined]
-        proc.stderr_text = stderr.decode("utf-8", errors="replace") if stderr else ""  # type: ignore[attr-defined]
-
-        # Make stdout/stderr accessible as .stdout/.stderr strings
-        proc.stdout = proc.stdout_text  # type: ignore[assignment]
-        proc.stderr = proc.stderr_text  # type: ignore[assignment]
-        return proc
+        return CommandResult(
+            returncode=proc.returncode or 0,
+            stdout=stdout.decode("utf-8", errors="replace") if stdout else "",
+            stderr=stderr.decode("utf-8", errors="replace") if stderr else "",
+        )

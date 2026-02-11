@@ -88,9 +88,10 @@ class FileReadTool(BaseTool):
             return f"Fehler beim Lesen: {e}"
 
         if file_size > _MAX_READ_SIZE:
-            # Read only the first chunk
+            # Read only the first chunk (memory-safe: don't load entire file)
             try:
-                content = path.read_text(encoding="utf-8", errors="replace")[:_MAX_READ_SIZE]
+                with open(path, encoding="utf-8", errors="replace") as f:
+                    content = f.read(_MAX_READ_SIZE)
                 return (
                     f"[Datei {_human_size(file_size)}, nur erste {_human_size(_MAX_READ_SIZE)} angezeigt]\n"
                     f"{content}\n[... gekuerzt]"

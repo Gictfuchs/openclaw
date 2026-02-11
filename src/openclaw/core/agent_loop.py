@@ -60,12 +60,24 @@ class AgentLoop:
                 yield ErrorEvent(message=f"Run-Budget ({self.llm.budget.per_run_limit} tokens) erreicht.")
                 return
 
-            response = await self.llm.generate(
-                messages=messages,
-                tools=tool_defs,
-                system=self.system_prompt,
-                complexity=TaskComplexity.COMPLEX,
-            )
+            try:
+                response = await self.llm.generate(
+                    messages=messages,
+                    tools=tool_defs,
+                    system=self.system_prompt,
+                    complexity=TaskComplexity.COMPLEX,
+                )
+            except RuntimeError as e:
+                # Budget exhausted or no provider available
+                yield ErrorEvent(message=str(e), recoverable=False)
+                return
+            except Exception as e:
+                logger.error("agent_loop_llm_error", iteration=iteration, error=str(e))
+                yield ErrorEvent(
+                    message="LLM-Aufruf fehlgeschlagen. Bitte spaeter erneut versuchen.",
+                    recoverable=True,
+                )
+                return
 
             # Track token usage for this run
             if response.usage:
