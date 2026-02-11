@@ -9,46 +9,31 @@ from __future__ import annotations
 
 import platform
 import shutil
+import socket
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
-# ---------------------------------------------------------------------------
-# ANSI helpers
-# ---------------------------------------------------------------------------
-_SUPPORTS_COLOR = hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
-_GREEN = "\033[92m" if _SUPPORTS_COLOR else ""
-_YELLOW = "\033[93m" if _SUPPORTS_COLOR else ""
-_RED = "\033[91m" if _SUPPORTS_COLOR else ""
-_CYAN = "\033[96m" if _SUPPORTS_COLOR else ""
-_BOLD = "\033[1m" if _SUPPORTS_COLOR else ""
-_DIM = "\033[2m" if _SUPPORTS_COLOR else ""
-_RESET = "\033[0m" if _SUPPORTS_COLOR else ""
-
-
-def _ok(msg: str) -> None:
-    print(f"  {_GREEN}✓{_RESET} {msg}")
-
-
-def _warn(msg: str) -> None:
-    print(f"  {_YELLOW}⚠{_RESET} {msg}")
-
-
-def _err(msg: str) -> None:
-    print(f"  {_RED}✗{_RESET} {msg}")
-
-
-def _info(msg: str) -> None:
-    print(f"  {_CYAN}ℹ{_RESET} {msg}")
-
-
-def _header(title: str) -> None:
-    width = 60
-    print()
-    print(f"  {_BOLD}{'─' * width}{_RESET}")
-    print(f"  {_BOLD}{title}{_RESET}")
-    print(f"  {_BOLD}{'─' * width}{_RESET}")
-    print()
+from openclaw.cli.output import (
+    BOLD,
+    DIM,
+    GREEN,
+    RED,
+    RESET,
+    YELLOW,
+    header,
+    info,
+)
+from openclaw.cli.output import (
+    err as _err_print,
+)
+from openclaw.cli.output import (
+    ok as _ok_print,
+)
+from openclaw.cli.output import (
+    warn as _warn_print,
+)
 
 
 class DoctorReport:
@@ -60,15 +45,15 @@ class DoctorReport:
         self.errors: int = 0
 
     def ok(self, msg: str) -> None:
-        _ok(msg)
+        _ok_print(msg)
         self.passed += 1
 
     def warn(self, msg: str) -> None:
-        _warn(msg)
+        _warn_print(msg)
         self.warnings += 1
 
     def err(self, msg: str) -> None:
-        _err(msg)
+        _err_print(msg)
         self.errors += 1
 
     @property
@@ -83,7 +68,7 @@ class DoctorReport:
 
 def _check_system(report: DoctorReport) -> None:
     """Check system prerequisites."""
-    _header("System")
+    header("System")
 
     # Python version
     v = sys.version_info
@@ -105,7 +90,7 @@ def _check_system(report: DoctorReport) -> None:
 
 def _check_config(report: DoctorReport) -> Any | None:
     """Validate configuration. Returns Settings object if valid."""
-    _header("Configuration")
+    header("Configuration")
 
     # Check .env file
     project_dir = Path.cwd()
@@ -114,7 +99,7 @@ def _check_config(report: DoctorReport) -> Any | None:
         report.ok(f".env file found ({env_path.stat().st_size} bytes)")
     else:
         report.err(f".env file not found at {env_path}")
-        _info("Run 'fochs setup' to create one")
+        info("Run 'fochs setup' to create one")
         return None
 
     # Try loading settings
@@ -151,7 +136,7 @@ def _check_config(report: DoctorReport) -> Any | None:
     if settings.github_token.get_secret_value():
         report.ok("GitHub token configured")
     else:
-        _info("GitHub token not set (optional)")
+        info("GitHub token not set (optional)")
 
     # Budget settings
     report.ok(
@@ -170,7 +155,7 @@ def _check_config(report: DoctorReport) -> Any | None:
 
 def _check_directories(report: DoctorReport, settings: Any) -> None:
     """Check data directories."""
-    _header("Directories")
+    header("Directories")
 
     data_dir = Path(settings.data_dir)
     if data_dir.is_dir():
@@ -182,7 +167,7 @@ def _check_directories(report: DoctorReport, settings: Any) -> None:
     if chroma_path.is_dir():
         report.ok(f"ChromaDB directory: {chroma_path}")
     else:
-        _info(f"ChromaDB directory will be created: {chroma_path}")
+        info(f"ChromaDB directory will be created: {chroma_path}")
 
     plugins_dir = Path(settings.plugins_dir)
     if plugins_dir.is_dir():
@@ -190,12 +175,12 @@ def _check_directories(report: DoctorReport, settings: Any) -> None:
         non_private = [f for f in py_files if not f.name.startswith("_")]
         report.ok(f"Plugins directory: {plugins_dir} ({len(non_private)} plugin file(s))")
     else:
-        _info(f"Plugins directory: {plugins_dir} (not created yet)")
+        info(f"Plugins directory: {plugins_dir} (not created yet)")
 
 
 async def _check_llm(report: DoctorReport, settings: Any) -> None:
     """Check LLM provider connectivity."""
-    _header("LLM Providers")
+    header("LLM Providers")
 
     from openclaw.llm.claude import ClaudeLLM
     from openclaw.llm.router import LLMRouter
@@ -219,21 +204,21 @@ async def _check_llm(report: DoctorReport, settings: Any) -> None:
                 if provider == "claude":
                     report.err(f"{provider}: unreachable")
                 else:
-                    _info(f"{provider}: not configured (optional)")
+                    info(f"{provider}: not configured (optional)")
     except Exception as e:
         report.err(f"LLM connectivity check failed: {e}")
 
 
 async def _check_database(report: DoctorReport, settings: Any) -> None:
     """Check database connectivity."""
-    _header("Database")
+    header("Database")
 
     db_path = Path(settings.db_path)
     if db_path.is_file():
         size_kb = db_path.stat().st_size / 1024
         report.ok(f"SQLite database: {db_path} ({size_kb:.1f} KB)")
     else:
-        _info(f"Database will be created on first start: {db_path}")
+        info(f"Database will be created on first start: {db_path}")
 
     # Try to import and check
     try:
@@ -248,7 +233,7 @@ async def _check_database(report: DoctorReport, settings: Any) -> None:
 
 def _check_budget_state(report: DoctorReport, settings: Any) -> None:
     """Check budget state file."""
-    _header("Token Budget")
+    header("Token Budget")
 
     budget_path = Path(settings.data_dir) / "budget_state.json"
     if budget_path.is_file():
@@ -266,12 +251,12 @@ def _check_budget_state(report: DoctorReport, settings: Any) -> None:
         except Exception as e:
             report.warn(f"Could not read budget state: {e}")
     else:
-        _info("No budget state file yet (will be created on first API call)")
+        info("No budget state file yet (will be created on first API call)")
 
 
 def _check_optional_integrations(report: DoctorReport, settings: Any) -> None:
     """Report optional integration status."""
-    _header("Optional Integrations")
+    header("Optional Integrations")
 
     integrations = [
         ("Composio", bool(settings.composio_api_key.get_secret_value())),
@@ -283,13 +268,13 @@ def _check_optional_integrations(report: DoctorReport, settings: Any) -> None:
     ]
 
     configured = sum(1 for _, v in integrations if v)
-    _info(f"{configured}/{len(integrations)} optional integrations configured")
+    info(f"{configured}/{len(integrations)} optional integrations configured")
 
     for name, active in integrations:
         if active:
             report.ok(f"{name}: configured")
         else:
-            _info(f"{name}: not configured")
+            info(f"{name}: not configured")
 
     # ClawHub safety check
     if (
@@ -305,15 +290,13 @@ def _check_launchd(report: DoctorReport) -> None:
     if platform.system() != "Darwin":
         return
 
-    _header("Service (launchd)")
+    header("Service (launchd)")
 
     plist_path = Path.home() / "Library" / "LaunchAgents" / "com.fochs.bot.plist"
     if plist_path.is_file():
         report.ok(f"Plist found: {plist_path}")
 
         # Check if loaded
-        import subprocess
-
         try:
             result = subprocess.run(
                 ["launchctl", "list"],
@@ -325,12 +308,108 @@ def _check_launchd(report: DoctorReport) -> None:
                 report.ok("Service is loaded in launchctl")
             else:
                 report.warn("Plist exists but service is not loaded")
-                _info(f"Run: launchctl load {plist_path}")
+                info(f"Run: launchctl load {plist_path}")
         except Exception:
             report.warn("Could not check launchctl status")
     else:
-        _info("No launchd plist found (optional)")
-        _info("Generate one with: fochs setup --generate-plist")
+        info("No launchd plist found (optional)")
+        info("Generate one with: fochs setup --generate-plist")
+
+
+def _check_systemd(report: DoctorReport) -> None:
+    """Check Linux systemd service status."""
+    if platform.system() != "Linux":
+        return
+
+    header("Service (systemd)")
+
+    unit_path = Path("/etc/systemd/system/fochs.service")
+    if not unit_path.is_file():
+        info("No systemd unit file at /etc/systemd/system/fochs.service")
+        info("Install with: sudo cp deploy/fochs.service /etc/systemd/system/")
+        return
+
+    report.ok("Unit file installed")
+
+    # Check enabled
+    try:
+        result = subprocess.run(
+            ["systemctl", "is-enabled", "fochs"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.stdout.strip() == "enabled":
+            report.ok("Service is enabled (starts on boot)")
+        else:
+            report.warn(f"Service is {result.stdout.strip()} (not enabled)")
+            info("Run: sudo systemctl enable fochs")
+    except Exception:
+        report.warn("Could not check systemd enabled status")
+
+    # Check active
+    try:
+        result = subprocess.run(
+            ["systemctl", "is-active", "fochs"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        status = result.stdout.strip()
+        if status == "active":
+            report.ok("Service is running")
+        elif status == "inactive":
+            report.warn("Service is not running")
+            info("Run: sudo systemctl start fochs")
+        else:
+            report.err(f"Service status: {status}")
+    except Exception:
+        report.warn("Could not check systemd active status")
+
+
+def _check_disk_space(report: DoctorReport, settings: Any) -> None:
+    """Check available disk space in the data directory."""
+    header("Disk Space")
+
+    data_dir = Path(settings.data_dir)
+    target = data_dir if data_dir.is_dir() else Path.cwd()
+
+    try:
+        usage = shutil.disk_usage(target)
+        free_gb = usage.free / (1024**3)
+        total_gb = usage.total / (1024**3)
+        used_pct = (usage.used / usage.total) * 100
+
+        report.ok(f"Disk: {free_gb:.1f} GB free of {total_gb:.1f} GB ({used_pct:.0f}% used)")
+
+        if free_gb < 1.0:
+            report.err("Less than 1 GB free — risk of data corruption")
+        elif free_gb < 5.0:
+            report.warn("Less than 5 GB free — consider freeing space")
+    except Exception as e:
+        report.warn(f"Could not check disk space: {e}")
+
+
+def _check_port(report: DoctorReport, settings: Any) -> None:
+    """Check if the web dashboard port is available."""
+    header("Network")
+
+    host = settings.web_host
+    port = settings.web_port
+
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(1)
+        result = sock.connect_ex((host, port))
+        sock.close()
+
+        if result == 0:
+            # Port is in use — could be Fochs itself or something else
+            report.warn(f"Port {host}:{port} is already in use (may be Fochs running)")
+        else:
+            report.ok(f"Port {host}:{port} is available")
+    except Exception as e:
+        report.warn(f"Could not check port {host}:{port}: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -341,8 +420,8 @@ def _check_launchd(report: DoctorReport) -> None:
 async def run_doctor() -> None:
     """Run all health checks and print summary."""
     print()
-    print(f"  {_BOLD}🦊 Fochs Doctor — Health Check{_RESET}")
-    print(f"  {_DIM}Checking your Fochs installation...{_RESET}")
+    print(f"  {BOLD}\U0001f98a Fochs Doctor — Health Check{RESET}")
+    print(f"  {DIM}Checking your Fochs installation...{RESET}")
 
     report = DoctorReport()
 
@@ -380,27 +459,36 @@ async def run_doctor() -> None:
     # 8. launchd (macOS only)
     _check_launchd(report)
 
+    # 9. systemd (Linux only)
+    _check_systemd(report)
+
+    # 10. Disk space
+    _check_disk_space(report, settings)
+
+    # 11. Port availability
+    _check_port(report, settings)
+
     # Summary
     _print_summary(report)
 
 
 def _print_summary(report: DoctorReport) -> None:
     """Print the final summary."""
-    _header("Summary")
+    header("Summary")
 
-    print(f"  {_GREEN}Passed:{_RESET}   {report.passed}")
-    print(f"  {_YELLOW}Warnings:{_RESET} {report.warnings}")
-    print(f"  {_RED}Errors:{_RESET}   {report.errors}")
+    print(f"  {GREEN}Passed:{RESET}   {report.passed}")
+    print(f"  {YELLOW}Warnings:{RESET} {report.warnings}")
+    print(f"  {RED}Errors:{RESET}   {report.errors}")
     print()
 
     if report.errors == 0:
         if report.warnings == 0:
-            print(f"  {_GREEN}{_BOLD}All checks passed! Fochs is ready to run.{_RESET}")
+            print(f"  {GREEN}{BOLD}All checks passed! Fochs is ready to run.{RESET}")
         else:
-            print(f"  {_YELLOW}{_BOLD}No errors, but {report.warnings} warning(s) to review.{_RESET}")
-        print(f"  Start with: {_BOLD}uv run fochs{_RESET}")
+            print(f"  {YELLOW}{BOLD}No errors, but {report.warnings} warning(s) to review.{RESET}")
+        print(f"  Start with: {BOLD}uv run fochs{RESET}")
     else:
-        print(f"  {_RED}{_BOLD}{report.errors} error(s) found. Please fix before running Fochs.{_RESET}")
-        print(f"  Run {_BOLD}fochs setup{_RESET} to reconfigure, or edit .env manually.")
+        print(f"  {RED}{BOLD}{report.errors} error(s) found. Please fix before running Fochs.{RESET}")
+        print(f"  Run {BOLD}fochs setup{RESET} to reconfigure, or edit .env manually.")
 
     print()

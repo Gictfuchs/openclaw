@@ -12,54 +12,34 @@ import os
 import platform
 import secrets
 import shutil
+import subprocess
 import sys
 import textwrap
 from pathlib import Path
 
+from openclaw.cli.output import (
+    BOLD,
+    DIM,
+    GREEN,
+    RED,
+    RESET,
+    err,
+    header,
+    info,
+    ok,
+    warn,
+)
+
 # ---------------------------------------------------------------------------
-# ANSI helpers (gracefully degrade on Windows < 10)
+# Interactive prompt helpers
 # ---------------------------------------------------------------------------
-_SUPPORTS_COLOR = hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
-
-_GREEN = "\033[92m" if _SUPPORTS_COLOR else ""
-_YELLOW = "\033[93m" if _SUPPORTS_COLOR else ""
-_RED = "\033[91m" if _SUPPORTS_COLOR else ""
-_CYAN = "\033[96m" if _SUPPORTS_COLOR else ""
-_BOLD = "\033[1m" if _SUPPORTS_COLOR else ""
-_DIM = "\033[2m" if _SUPPORTS_COLOR else ""
-_RESET = "\033[0m" if _SUPPORTS_COLOR else ""
-
-
-def _ok(msg: str) -> None:
-    print(f"  {_GREEN}✓{_RESET} {msg}")
-
-
-def _warn(msg: str) -> None:
-    print(f"  {_YELLOW}⚠{_RESET} {msg}")
-
-
-def _err(msg: str) -> None:
-    print(f"  {_RED}✗{_RESET} {msg}")
-
-
-def _info(msg: str) -> None:
-    print(f"  {_CYAN}ℹ{_RESET} {msg}")
-
-
-def _header(title: str) -> None:
-    width = 60
-    print()
-    print(f"  {_BOLD}{'─' * width}{_RESET}")
-    print(f"  {_BOLD}{title}{_RESET}")
-    print(f"  {_BOLD}{'─' * width}{_RESET}")
-    print()
 
 
 def _prompt(label: str, *, default: str = "", secret: bool = False, required: bool = False) -> str:
     """Prompt for a value with optional default."""
     suffix = f" [{default}]" if default else ""
     if required:
-        label = f"{label} {_RED}(required){_RESET}"
+        label = f"{label} {RED}(required){RESET}"
 
     while True:
         value = getpass.getpass(f"  {label}{suffix}: ").strip() if secret else input(f"  {label}{suffix}: ").strip()
@@ -67,7 +47,7 @@ def _prompt(label: str, *, default: str = "", secret: bool = False, required: bo
         if not value and default:
             return default
         if not value and required:
-            _err("This field is required.")
+            err("This field is required.")
             continue
         return value
 
@@ -76,7 +56,7 @@ def _prompt_choice(label: str, choices: list[str], default: str = "") -> str:
     """Prompt user to pick from a list of choices."""
     print(f"  {label}")
     for i, choice in enumerate(choices, 1):
-        marker = f" {_GREEN}(default){_RESET}" if choice == default else ""
+        marker = f" {GREEN}(default){RESET}" if choice == default else ""
         print(f"    {i}) {choice}{marker}")
 
     while True:
@@ -89,7 +69,7 @@ def _prompt_choice(label: str, choices: list[str], default: str = "") -> str:
                 return choices[idx - 1]
         except ValueError:
             pass
-        _err(f"Please enter a number between 1 and {len(choices)}.")
+        err(f"Please enter a number between 1 and {len(choices)}.")
 
 
 def _prompt_yn(question: str, *, default: bool = True) -> bool:
@@ -130,6 +110,66 @@ def _validate_telegram_user_id(uid: str) -> bool:
 def _check_command(cmd: str) -> bool:
     """Check if a command exists on PATH."""
     return shutil.which(cmd) is not None
+
+
+# ---------------------------------------------------------------------------
+# Bootstrap helpers (directory creation, uv sync, .env.example copy)
+# ---------------------------------------------------------------------------
+
+
+def _copy_env_example_if_needed(project_dir: Path) -> None:
+    """Copy .env.example to .env if no .env exists yet."""
+    env_path = project_dir / ".env"
+    example_path = project_dir / ".env.example"
+    if not env_path.is_file() and example_path.is_file():
+        shutil.copy2(example_path, env_path)
+        info(f"Copied {example_path.name} as starting point")
+
+
+def _run_uv_sync(project_dir: Path) -> bool:
+    """Run ``uv sync`` to install dependencies. Returns True on success."""
+    if not shutil.which("uv"):
+        warn("uv not found — skipping dependency install")
+        return False
+
+    info("Running uv sync to install dependencies...")
+    try:
+        result = subprocess.run(
+            ["uv", "sync"],
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        if result.returncode == 0:
+            ok("Dependencies installed")
+            return True
+        err(f"uv sync failed: {result.stderr[:200]}")
+        return False
+    except subprocess.TimeoutExpired:
+        err("uv sync timed out (5 minutes)")
+        return False
+
+
+def _ensure_project_dirs(project_dir: Path, values: dict[str, str]) -> None:
+    """Create data, plugins, and logs directories."""
+    data_dir = Path(values.get("FOCHS_DATA_DIR", "./data"))
+    if not data_dir.is_absolute():
+        data_dir = project_dir / data_dir
+
+    plugins_dir = Path(values.get("FOCHS_PLUGINS_DIR", "./plugins"))
+    if not plugins_dir.is_absolute():
+        plugins_dir = project_dir / plugins_dir
+
+    dirs_to_create = [
+        data_dir,
+        data_dir / "chroma",
+        data_dir / "logs",
+        plugins_dir,
+    ]
+    for d in dirs_to_create:
+        d.mkdir(parents=True, exist_ok=True)
+    ok(f"Project directories ready ({len(dirs_to_create)} dirs)")
 
 
 # ---------------------------------------------------------------------------
@@ -298,7 +338,7 @@ def _write_env(env_path: Path, values: dict[str, str]) -> None:
 def _generate_plist(project_dir: Path) -> Path | None:
     """Generate a macOS launchd plist for auto-start."""
     if platform.system() != "Darwin":
-        _warn("launchd plists are macOS-only. Use systemd on Linux.")
+        warn("launchd plists are macOS-only. Use systemd on Linux.")
         return None
 
     user = os.environ.get("USER", "unknown")
@@ -354,11 +394,11 @@ def _generate_plist(project_dir: Path) -> Path | None:
 
 def _validate_existing_config(project_dir: Path) -> bool:
     """Validate an existing .env file without prompts. Returns True if valid."""
-    _header("Validating existing configuration")
+    header("Validating existing configuration")
 
     env_path = project_dir / ".env"
     if not env_path.is_file():
-        _err(f"No .env file found at {env_path}")
+        err(f"No .env file found at {env_path}")
         return False
 
     env = _load_existing_env(env_path)
@@ -391,18 +431,18 @@ def _validate_existing_config(project_dir: Path) -> bool:
         from openclaw.config import Settings
 
         Settings()
-        _ok("Pydantic Settings loaded successfully")
+        ok("Pydantic Settings loaded successfully")
     except Exception as e:
         errors.append(f"Settings validation failed: {e}")
 
     # Report
     for w in warnings:
-        _warn(w)
+        warn(w)
     for e in errors:
-        _err(e)
+        err(e)
 
     if not errors:
-        _ok("Configuration is valid")
+        ok("Configuration is valid")
         return True
     return False
 
@@ -415,91 +455,98 @@ def _validate_existing_config(project_dir: Path) -> bool:
 def _run_interactive_setup(project_dir: Path, generate_plist: bool = False) -> None:
     """Run the full interactive setup wizard."""
     print()
-    print(f"  {_BOLD}🦊 Fochs Setup Wizard{_RESET}")
-    print(f"  {_DIM}Guided configuration for your autonomous AI agent{_RESET}")
+    print(f"  {BOLD}🦊 Fochs Setup Wizard{RESET}")
+    print(f"  {DIM}Guided configuration for your autonomous AI agent{RESET}")
+
+    # Copy .env.example as starting point if no .env exists
+    _copy_env_example_if_needed(project_dir)
 
     env_path = project_dir / ".env"
     existing = _load_existing_env(env_path)
     values: dict[str, str] = dict(existing)  # Start with existing values
 
     if env_path.is_file():
-        _info(f"Found existing .env at {env_path}")
+        info(f"Found existing .env at {env_path}")
         if not _prompt_yn("Update existing configuration?"):
-            _info("Setup cancelled.")
+            info("Setup cancelled.")
             return
 
     # ── Step 1: Prerequisites ──────────────────────────────────────────
-    _header("Step 1/6: Prerequisites Check")
+    header("Step 1/6: Prerequisites Check")
 
     prereqs_ok = True
     for cmd, label in [("python3", "Python 3.12+"), ("uv", "uv package manager"), ("git", "Git")]:
         if _check_command(cmd):
-            _ok(f"{label} found")
+            ok(f"{label} found")
         else:
-            _err(f"{label} not found — please install first")
+            err(f"{label} not found — please install first")
             prereqs_ok = False
 
     # Report Python version (already checked since we're running on 3.12+)
-    _ok(f"Python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")
+    ok(f"Python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")
 
     if not prereqs_ok:
-        _err("Please fix prerequisites before continuing.")
+        err("Please fix prerequisites before continuing.")
         if not _prompt_yn("Continue anyway?", default=False):
             sys.exit(1)
 
-    # ── Step 2: LLM Provider ──────────────────────────────────────────
-    _header("Step 2/6: LLM Provider (required)")
+    # Run uv sync if available
+    if _check_command("uv") and _prompt_yn("Install/update dependencies with uv sync?"):
+        _run_uv_sync(project_dir)
 
-    _info("At least one LLM provider is needed. Anthropic (Claude) is recommended.")
+    # ── Step 2: LLM Provider ──────────────────────────────────────────
+    header("Step 2/6: LLM Provider (required)")
+
+    info("At least one LLM provider is needed. Anthropic (Claude) is recommended.")
     print()
 
     # Anthropic
     existing_anthropic = existing.get("FOCHS_ANTHROPIC_API_KEY", "")
     has_anthropic = existing_anthropic and not existing_anthropic.startswith("sk-ant-...")
     if has_anthropic:
-        _ok("Anthropic API key already configured")
+        ok("Anthropic API key already configured")
         if _prompt_yn("Replace existing key?", default=False):
             has_anthropic = False
 
     if not has_anthropic:
-        _info("Get your key at: https://console.anthropic.com/")
+        info("Get your key at: https://console.anthropic.com/")
         key = _prompt("Anthropic API Key", secret=True)
         if key:
             if _validate_anthropic_key(key):
                 values["FOCHS_ANTHROPIC_API_KEY"] = key
-                _ok("Anthropic API key set")
+                ok("Anthropic API key set")
             else:
-                _warn("Key format looks unusual — saving anyway")
+                warn("Key format looks unusual — saving anyway")
                 values["FOCHS_ANTHROPIC_API_KEY"] = key
 
     values.setdefault("FOCHS_ANTHROPIC_MODEL", "claude-sonnet-4-5-20250929")
 
     # Gemini (optional)
     if _prompt_yn("Configure Google Gemini as fallback LLM?", default=False):
-        _info("Get your key at: https://aistudio.google.com/")
+        info("Get your key at: https://aistudio.google.com/")
         key = _prompt("Gemini API Key", secret=True)
         if key:
             values["FOCHS_GEMINI_API_KEY"] = key
-            _ok("Gemini API key set")
+            ok("Gemini API key set")
 
     # xAI (optional)
     if _prompt_yn("Configure xAI (Grok) as fallback LLM?", default=False):
         key = _prompt("xAI API Key", secret=True)
         if key:
             values["FOCHS_XAI_API_KEY"] = key
-            _ok("xAI API key set")
+            ok("xAI API key set")
 
     # ── Step 3: Telegram Bot ──────────────────────────────────────────
-    _header("Step 3/6: Telegram Bot (recommended for autonomy)")
+    header("Step 3/6: Telegram Bot (recommended for autonomy)")
 
-    _info("Create a bot via @BotFather on Telegram and paste the token here.")
-    _info("Find your user ID via @userinfobot or @RawDataBot.")
+    info("Create a bot via @BotFather on Telegram and paste the token here.")
+    info("Find your user ID via @userinfobot or @RawDataBot.")
     print()
 
     existing_token = existing.get("FOCHS_TELEGRAM_BOT_TOKEN", "")
     has_telegram = existing_token and not existing_token.startswith("123456:")
     if has_telegram:
-        _ok("Telegram bot token already configured")
+        ok("Telegram bot token already configured")
         if _prompt_yn("Replace existing token?", default=False):
             has_telegram = False
 
@@ -508,15 +555,15 @@ def _run_interactive_setup(project_dir: Path, generate_plist: bool = False) -> N
         if token:
             if _validate_telegram_token(token):
                 values["FOCHS_TELEGRAM_BOT_TOKEN"] = token
-                _ok("Telegram bot token set")
+                ok("Telegram bot token set")
             else:
-                _warn("Token format looks unusual (expected 123456:ABC...) — saving anyway")
+                warn("Token format looks unusual (expected 123456:ABC...) — saving anyway")
                 values["FOCHS_TELEGRAM_BOT_TOKEN"] = token
 
     # User IDs
     existing_users = existing.get("FOCHS_TELEGRAM_ALLOWED_USERS", "[]")
     if existing_users and existing_users != "[]":
-        _ok(f"Allowed users already configured: {existing_users}")
+        ok(f"Allowed users already configured: {existing_users}")
         if not _prompt_yn("Replace allowed users?", default=False):
             pass  # keep existing
         else:
@@ -524,40 +571,40 @@ def _run_interactive_setup(project_dir: Path, generate_plist: bool = False) -> N
 
     if not existing_users or existing_users == "[]":
         user_ids: list[str] = []
-        _info("Enter your Telegram user ID(s). Press Enter without input when done.")
+        info("Enter your Telegram user ID(s). Press Enter without input when done.")
         while True:
             uid = _prompt("Telegram User ID (or Enter to finish)")
             if not uid:
                 break
             if _validate_telegram_user_id(uid):
                 user_ids.append(uid)
-                _ok(f"Added user {uid}")
+                ok(f"Added user {uid}")
             else:
-                _err("Invalid user ID — must be a positive integer")
+                err("Invalid user ID — must be a positive integer")
 
         if user_ids:
             values["FOCHS_TELEGRAM_ALLOWED_USERS"] = "[" + ",".join(user_ids) + "]"
         else:
-            _warn("No user IDs set — bot will reject all messages until configured")
+            warn("No user IDs set — bot will reject all messages until configured")
 
     # ── Step 4: Optional Services ─────────────────────────────────────
-    _header("Step 4/6: Optional Services")
+    header("Step 4/6: Optional Services")
 
     # Brave Search
     if _prompt_yn("Configure Brave Search? (web search capability)", default=True):
-        _info("Get your key at: https://brave.com/search/api/ (free: 2000 queries/month)")
+        info("Get your key at: https://brave.com/search/api/ (free: 2000 queries/month)")
         key = _prompt("Brave Search API Key", secret=True)
         if key:
             values["FOCHS_BRAVE_API_KEY"] = key
-            _ok("Brave Search API key set")
+            ok("Brave Search API key set")
 
     # GitHub
     if _prompt_yn("Configure GitHub integration?", default=False):
-        _info("Create a token at: https://github.com/settings/tokens")
+        info("Create a token at: https://github.com/settings/tokens")
         key = _prompt("GitHub Personal Access Token", secret=True)
         if key:
             values["FOCHS_GITHUB_TOKEN"] = key
-            _ok("GitHub token set")
+            ok("GitHub token set")
 
     # Email
     if _prompt_yn("Configure email (IMAP/SMTP)?", default=False):
@@ -566,10 +613,10 @@ def _run_interactive_setup(project_dir: Path, generate_plist: bool = False) -> N
         values["FOCHS_EMAIL_SMTP_HOST"] = _prompt("SMTP host", default="smtp.gmail.com")
         password = _prompt("Email password / app password", secret=True, required=True)
         values["FOCHS_EMAIL_PASSWORD"] = password
-        _ok("Email configured")
+        ok("Email configured")
 
     # ── Step 5: Autonomy & Security ───────────────────────────────────
-    _header("Step 5/6: Autonomy & Security")
+    header("Step 5/6: Autonomy & Security")
 
     autonomy = _prompt_choice(
         "Autonomy level:",
@@ -586,13 +633,13 @@ def _run_interactive_setup(project_dir: Path, generate_plist: bool = False) -> N
     values["FOCHS_SHELL_MODE"] = shell_mode
 
     if shell_mode == "unrestricted":
-        _warn("Unrestricted shell gives the agent full system access!")
+        warn("Unrestricted shell gives the agent full system access!")
         if not _prompt_yn("Are you sure?", default=False):
             values["FOCHS_SHELL_MODE"] = "standard"
-            _info("Downgraded to 'standard' mode")
+            info("Downgraded to 'standard' mode")
 
     # Budget
-    _info("Token budget prevents runaway costs.")
+    info("Token budget prevents runaway costs.")
     daily = _prompt("Daily token budget", default="500000")
     values["FOCHS_DAILY_TOKEN_BUDGET"] = daily
     monthly = _prompt("Monthly token budget", default="10000000")
@@ -603,7 +650,7 @@ def _run_interactive_setup(project_dir: Path, generate_plist: bool = False) -> N
     values["FOCHS_MAX_ITERATIONS"] = _prompt("Max iterations per conversation", default="10")
 
     # Web dashboard
-    _info("Web dashboard provides monitoring and control.")
+    info("Web dashboard provides monitoring and control.")
     web_host = _prompt("Web dashboard host", default="127.0.0.1")
     values["FOCHS_WEB_HOST"] = web_host
     web_port = _prompt("Web dashboard port", default="8080")
@@ -626,25 +673,28 @@ def _run_interactive_setup(project_dir: Path, generate_plist: bool = False) -> N
     values.setdefault("FOCHS_PROACTIVE_MESSAGE_LIMIT", "50")
 
     # ── Step 6: Write .env ────────────────────────────────────────────
-    _header("Step 6/6: Save Configuration")
+    header("Step 6/6: Save Configuration")
 
     # Backup existing .env
     if env_path.is_file():
         backup = env_path.with_suffix(".env.backup")
         shutil.copy2(env_path, backup)
-        _info(f"Backed up existing .env to {backup.name}")
+        info(f"Backed up existing .env to {backup.name}")
 
     _write_env(env_path, values)
-    _ok(f"Configuration written to {env_path}")
+    ok(f"Configuration written to {env_path}")
+
+    # Create project directories
+    _ensure_project_dirs(project_dir, values)
 
     # Validate with Pydantic
     print()
-    _info("Validating configuration...")
+    info("Validating configuration...")
     try:
         from openclaw.config import Settings
 
         settings = Settings()
-        _ok("Pydantic validation passed")
+        ok("Pydantic validation passed")
 
         # Summary
         has_anthropic_key = bool(settings.anthropic_api_key.get_secret_value())
@@ -653,18 +703,18 @@ def _run_interactive_setup(project_dir: Path, generate_plist: bool = False) -> N
         has_github_token = bool(settings.github_token.get_secret_value())
 
         print()
-        _info("Configuration summary:")
-        print(f"    LLM:       {'Claude ✓' if has_anthropic_key else '✗ No LLM!'}")
-        print(f"    Telegram:  {'✓' if has_telegram_token else '✗ (bot mode disabled)'}")
-        print(f"    Search:    {'Brave ✓' if has_brave_key else '✗'}")
-        print(f"    GitHub:    {'✓' if has_github_token else '✗'}")
+        info("Configuration summary:")
+        print(f"    LLM:       {'Claude \u2713' if has_anthropic_key else '\u2717 No LLM!'}")
+        print(f"    Telegram:  {'\u2713' if has_telegram_token else '\u2717 (bot mode disabled)'}")
+        print(f"    Search:    {'Brave \u2713' if has_brave_key else '\u2717'}")
+        print(f"    GitHub:    {'\u2713' if has_github_token else '\u2717'}")
         print(f"    Autonomy:  {settings.autonomy_level}")
         print(f"    Shell:     {settings.shell_mode}")
         print(f"    Budget:    {settings.daily_token_budget:,}/day, {settings.monthly_token_budget:,}/month")
 
     except Exception as e:
-        _err(f"Validation failed: {e}")
-        _warn("Please fix the issues and run 'fochs setup' again or edit .env manually.")
+        err(f"Validation failed: {e}")
+        warn("Please fix the issues and run 'fochs setup' again or edit .env manually.")
         return
 
     # ── Optional: launchd plist ───────────────────────────────────────
@@ -673,18 +723,18 @@ def _run_interactive_setup(project_dir: Path, generate_plist: bool = False) -> N
     ):
         plist_path = _generate_plist(project_dir)
         if plist_path:
-            _ok(f"Plist written to {plist_path}")
-            _info("To activate:")
+            ok(f"Plist written to {plist_path}")
+            info("To activate:")
             print(f"    launchctl load {plist_path}")
             print("    launchctl start com.fochs.bot")
 
     # ── Done ──────────────────────────────────────────────────────────
     print()
-    print(f"  {_GREEN}{_BOLD}Setup complete!{_RESET}")
+    print(f"  {GREEN}{BOLD}Setup complete!{RESET}")
     print()
-    _info("Next steps:")
-    print(f"    1. Start the bot:   {_BOLD}uv run fochs{_RESET}")
-    print(f"    2. Health check:    {_BOLD}uv run fochs doctor{_RESET}")
+    info("Next steps:")
+    print(f"    1. Start the bot:   {BOLD}uv run fochs{RESET}")
+    print(f"    2. Health check:    {BOLD}uv run fochs doctor{RESET}")
     print("    3. Talk to Fochs via Telegram")
     print()
 
@@ -706,7 +756,7 @@ def run_setup(*, non_interactive: bool = False, generate_plist: bool = False) ->
                 break
 
     if non_interactive:
-        ok = _validate_existing_config(project_dir)
-        sys.exit(0 if ok else 1)
+        result = _validate_existing_config(project_dir)
+        sys.exit(0 if result else 1)
     else:
         _run_interactive_setup(project_dir, generate_plist=generate_plist)

@@ -6,6 +6,8 @@ Subcommands:
     fochs          — Start the bot (default)
     fochs setup    — Interactive first-run configuration wizard
     fochs doctor   — Health-check / diagnostic report
+    fochs preflight — Full bootstrap: prereqs → install → setup → doctor
+    fochs update   — Update Fochs (git pull + uv sync + restart)
 """
 
 from __future__ import annotations
@@ -38,6 +40,33 @@ def main() -> None:
     # --- fochs doctor ---
     sub.add_parser("doctor", help="Run health checks and diagnostics")
 
+    # --- fochs preflight ---
+    preflight_parser = sub.add_parser(
+        "preflight",
+        help="Full bootstrap: prereqs → install → setup → doctor",
+    )
+    preflight_parser.add_argument(
+        "--non-interactive",
+        action="store_true",
+        help="Run without prompts (for CI/CD)",
+    )
+
+    # --- fochs update ---
+    update_parser = sub.add_parser(
+        "update",
+        help="Update Fochs (git pull + uv sync + restart)",
+    )
+    update_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would change without applying",
+    )
+    update_parser.add_argument(
+        "--no-restart",
+        action="store_true",
+        help="Skip automatic service restart",
+    )
+
     args = parser.parse_args()
 
     if args.command == "setup":
@@ -48,6 +77,14 @@ def main() -> None:
         from openclaw.cli.doctor import run_doctor
 
         asyncio.run(run_doctor())
+    elif args.command == "preflight":
+        from openclaw.cli.preflight import run_preflight
+
+        run_preflight(non_interactive=args.non_interactive)
+    elif args.command == "update":
+        from openclaw.cli.update import run_update
+
+        run_update(dry_run=args.dry_run, restart=not args.no_restart)
     else:
         # Default: start the bot
         from openclaw.app import FochsApp

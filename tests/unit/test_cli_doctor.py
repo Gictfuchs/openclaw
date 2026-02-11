@@ -10,7 +10,10 @@ from openclaw.cli.doctor import (
     DoctorReport,
     _check_budget_state,
     _check_directories,
+    _check_disk_space,
+    _check_port,
     _check_system,
+    _check_systemd,
 )
 
 # ---------------------------------------------------------------------------
@@ -245,6 +248,172 @@ class TestCheckOptionalIntegrations:
 
         report = DoctorReport()
         _check_optional_integrations(report, settings)
+        assert report.warnings >= 1
+
+
+# ---------------------------------------------------------------------------
+# Full doctor run (integration-ish)
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Disk space checks
+# ---------------------------------------------------------------------------
+
+
+class TestCheckDiskSpace:
+    def test_sufficient_space(self, tmp_path: Path) -> None:
+        settings = MagicMock()
+        settings.data_dir = str(tmp_path)
+
+        report = DoctorReport()
+        _check_disk_space(report, settings)
+        # Should always pass on a dev machine with space
+        assert report.passed >= 1
+
+    def test_low_space_warns(self, tmp_path: Path) -> None:
+        settings = MagicMock()
+        settings.data_dir = str(tmp_path)
+
+        # Mock disk_usage to return low free space (3 GB)
+        mock_usage = MagicMock()
+        mock_usage.free = 3 * (1024**3)
+        mock_usage.total = 500 * (1024**3)
+        mock_usage.used = 497 * (1024**3)
+
+        report = DoctorReport()
+        with patch("openclaw.cli.doctor.shutil.disk_usage", return_value=mock_usage):
+            _check_disk_space(report, settings)
+        assert report.warnings >= 1
+
+    def test_critical_space_errors(self, tmp_path: Path) -> None:
+        settings = MagicMock()
+        settings.data_dir = str(tmp_path)
+
+        # Mock disk_usage to return critical free space (500 MB)
+        mock_usage = MagicMock()
+        mock_usage.free = 0.5 * (1024**3)
+        mock_usage.total = 500 * (1024**3)
+        mock_usage.used = 499.5 * (1024**3)
+
+        report = DoctorReport()
+        with patch("openclaw.cli.doctor.shutil.disk_usage", return_value=mock_usage):
+            _check_disk_space(report, settings)
+        assert report.errors >= 1
+
+    def test_nonexistent_dir_uses_cwd(self, tmp_path: Path) -> None:
+        """When data_dir doesn't exist, should fall back to cwd."""
+        settings = MagicMock()
+        settings.data_dir = str(tmp_path / "nonexistent")
+
+        report = DoctorReport()
+        _check_disk_space(report, settings)
+        # Should still succeed (using cwd)
+        assert report.passed >= 1
+
+
+# ---------------------------------------------------------------------------
+# Port checks
+# ---------------------------------------------------------------------------
+
+
+class TestCheckPort:
+    def test_port_available(self) -> None:
+        settings = MagicMock()
+        settings.web_host = "127.0.0.1"
+        settings.web_port = 59999  # Unlikely to be in use
+
+        report = DoctorReport()
+        _check_port(report, settings)
+        assert report.passed >= 1
+
+    def test_port_in_use(self) -> None:
+        import socket as sock_mod
+
+        settings = MagicMock()
+        settings.web_host = "127.0.0.1"
+        settings.web_port = 0  # Will be set after binding
+
+        # Bind a socket to grab a port
+        server = sock_mod.socket(sock_mod.AF_INET, sock_mod.SOCK_STREAM)
+        server.bind(("127.0.0.1", 0))
+        server.listen(1)
+        _, port = server.getsockname()
+        settings.web_port = port
+
+        try:
+            report = DoctorReport()
+            _check_port(report, settings)
+            assert report.warnings >= 1
+        finally:
+            server.close()
+
+    def test_socket_error_warns(self) -> None:
+        settings = MagicMock()
+        settings.web_host = "127.0.0.1"
+        settings.web_port = 8080
+
+        report = DoctorReport()
+        with patch("openclaw.cli.doctor.socket.socket", side_effect=OSError("mock error")):
+            _check_port(report, settings)
+        assert report.warnings >= 1
+
+
+# ---------------------------------------------------------------------------
+# Systemd checks
+# ---------------------------------------------------------------------------
+
+
+class TestCheckSystemd:
+    def test_skips_on_non_linux(self) -> None:
+        report = DoctorReport()
+        with patch("openclaw.cli.doctor.platform.system", return_value="Darwin"):
+            _check_systemd(report)
+        assert report.total == 0
+
+    def test_no_unit_file(self) -> None:
+        report = DoctorReport()
+        with (
+            patch("openclaw.cli.doctor.platform.system", return_value="Linux"),
+            patch("openclaw.cli.doctor.Path") as mock_path_cls,
+        ):
+            mock_path_cls.return_value.is_file.return_value = False
+            # Use a fresh Path mock for the unit file check
+            mock_unit_path = MagicMock()
+            mock_unit_path.is_file.return_value = False
+            mock_path_cls.return_value = mock_unit_path
+            _check_systemd(report)
+        # No unit file means no checks recorded (just info messages)
+        assert report.errors == 0
+
+    def test_enabled_and_active(self) -> None:
+        report = DoctorReport()
+        enabled_result = MagicMock()
+        enabled_result.stdout = "enabled\n"
+        active_result = MagicMock()
+        active_result.stdout = "active\n"
+
+        with (
+            patch("openclaw.cli.doctor.platform.system", return_value="Linux"),
+            patch("pathlib.Path.is_file", return_value=True),
+            patch("openclaw.cli.doctor.subprocess.run", side_effect=[enabled_result, active_result]),
+        ):
+            _check_systemd(report)
+        assert report.passed >= 2  # unit file + enabled + active
+
+    def test_not_enabled(self) -> None:
+        report = DoctorReport()
+        enabled_result = MagicMock()
+        enabled_result.stdout = "disabled\n"
+        active_result = MagicMock()
+        active_result.stdout = "inactive\n"
+
+        with (
+            patch("openclaw.cli.doctor.platform.system", return_value="Linux"),
+            patch("pathlib.Path.is_file", return_value=True),
+            patch("openclaw.cli.doctor.subprocess.run", side_effect=[enabled_result, active_result]),
+        ):
+            _check_systemd(report)
         assert report.warnings >= 1
 
 
