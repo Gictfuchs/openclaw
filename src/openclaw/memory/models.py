@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -75,4 +75,48 @@ class ActivityLog(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         default=lambda: datetime.now(UTC),
+    )
+
+
+class WatchSubscription(Base):
+    """User subscriptions for proactive watching."""
+
+    __tablename__ = "watch_subscriptions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, index=True)
+    watcher_type: Mapped[str] = mapped_column(String(20), index=True)  # topic, github, rss, email
+    target: Mapped[str] = mapped_column(String(500))  # query, repo name, feed URL, "inbox"
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=lambda: datetime.now(UTC),
+    )
+
+
+class WatcherState(Base):
+    """State tracking for watchers to detect new items."""
+
+    __tablename__ = "watcher_state"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    subscription_id: Mapped[int] = mapped_column(Integer, ForeignKey("watch_subscriptions.id"), unique=True)
+    last_check: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=lambda: datetime.now(UTC),
+    )
+    known_items: Mapped[str] = mapped_column(Text, default="[]")  # JSON list of item IDs/hashes
+
+
+class ProactiveMessageLog(Base):
+    """Log of proactive messages sent for budget tracking."""
+
+    __tablename__ = "proactive_message_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, index=True)
+    sent_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=lambda: datetime.now(UTC),
+        index=True,
     )

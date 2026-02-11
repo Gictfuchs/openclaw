@@ -6,6 +6,7 @@ import time
 from typing import TYPE_CHECKING
 
 import structlog
+from sqlalchemy import select
 from telegram.ext import (
     Application,
     ApplicationBuilder,
@@ -16,10 +17,13 @@ from telegram.ext import (
 )
 
 from openclaw.core.events import ErrorEvent, ResponseEvent, ToolCallEvent
+from openclaw.db.engine import get_session
+from openclaw.memory.models import WatcherState, WatchSubscription
 
 if TYPE_CHECKING:
     from telegram import Update
 
+    from openclaw.config import Settings
     from openclaw.core.agent import FochsAgent
     from openclaw.research.engine import ResearchEngine
 
@@ -39,10 +43,12 @@ class FochsTelegramBot:
         agent: FochsAgent,
         allowed_users: list[int] | None = None,
         research: ResearchEngine | None = None,
+        settings: Settings | None = None,
     ) -> None:
         self.agent = agent
         self.allowed_users = allowed_users or []
         self.research = research
+        self.settings = settings
         self.app: Application = ApplicationBuilder().token(token).build()  # type: ignore[assignment]
         self._rate_tracker: dict[int, list[float]] = {}
         self._register_handlers()
@@ -53,6 +59,10 @@ class FochsTelegramBot:
         self.app.add_handler(CommandHandler("status", self.cmd_status))
         self.app.add_handler(CommandHandler("clear", self.cmd_clear))
         self.app.add_handler(CommandHandler("research", self.cmd_research))
+        self.app.add_handler(CommandHandler("watch", self.cmd_watch))
+        self.app.add_handler(CommandHandler("unwatch", self.cmd_unwatch))
+        self.app.add_handler(CommandHandler("watches", self.cmd_watches))
+        self.app.add_handler(CommandHandler("autonomy", self.cmd_autonomy))
         self.app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.on_message))
 
     def _is_authorized(self, user_id: int) -> bool:
@@ -99,9 +109,12 @@ class FochsTelegramBot:
             "/help - Diese Hilfe\n"
             "/status - Agent-Status anzeigen\n"
             "/research <thema> - Tiefe Recherche\n"
+            "/watch <typ> <ziel> - Thema/Repo/Feed ueberwachen\n"
+            "/unwatch <id> - Watch deaktivieren\n"
+            "/watches - Aktive Watches anzeigen\n"
+            "/autonomy <level> - Autonomie: full/ask/manual\n"
             "/clear - Gespraechsverlauf loeschen\n\n"
-            "Oder schreib einfach eine Nachricht!\n"
-            "Ich kann auch GitHub Repos pruefen, E-Mails lesen/senden und RSS Feeds abrufen.",
+            "Oder schreib einfach eine Nachricht!",
             parse_mode="Markdown",
         )
 
@@ -188,6 +201,118 @@ class FochsTelegramBot:
         except Exception as e:
             logger.error("research_command_failed", error=str(e))
             await update.message.reply_text(f"Recherche fehlgeschlagen: {e}")
+
+    async def cmd_watch(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /watch <type> <target> command."""
+        if not update.effective_user or not update.message:
+            return
+        if not self._is_authorized(update.effective_user.id):
+            return
+
+        args = context.args or []
+        if len(args) < 2:
+            await update.message.reply_text(
+                "Nutzung: /watch <typ> <ziel>\n\n"
+                "Typen: topic, github, rss, email\n"
+                "Beispiele:\n"
+                "  /watch topic KI Regulierung\n"
+                "  /watch github owner/repo\n"
+                "  /watch rss https://example.com/feed\n"
+                "  /watch email inbox"
+            )
+            return
+
+        watcher_type = args[0].lower()
+        valid_types = {"topic", "github", "rss", "email"}
+        if watcher_type not in valid_types:
+            await update.message.reply_text(f"Ungueltiger Typ. Erlaubt: {', '.join(sorted(valid_types))}")
+            return
+
+        target = " ".join(args[1:])
+        user_id = update.effective_user.id
+
+        async with get_session() as session:
+            sub = WatchSubscription(user_id=user_id, watcher_type=watcher_type, target=target)
+            session.add(sub)
+            await session.flush()
+            session.add(WatcherState(subscription_id=sub.id))
+            await session.commit()
+            sub_id = sub.id
+
+        await update.message.reply_text(f"Watch #{sub_id} erstellt: [{watcher_type}] {target}")
+
+    async def cmd_unwatch(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /unwatch <id> command."""
+        if not update.effective_user or not update.message:
+            return
+        if not self._is_authorized(update.effective_user.id):
+            return
+
+        args = context.args or []
+        if not args or not args[0].isdigit():
+            await update.message.reply_text("Nutzung: /unwatch <id>")
+            return
+
+        sub_id = int(args[0])
+        async with get_session() as session:
+            result = await session.execute(select(WatchSubscription).where(WatchSubscription.id == sub_id))
+            sub = result.scalar_one_or_none()
+            if not sub:
+                await update.message.reply_text(f"Watch #{sub_id} nicht gefunden.")
+                return
+            sub.active = False
+            await session.commit()
+
+        await update.message.reply_text(f"Watch #{sub_id} deaktiviert.")
+
+    async def cmd_watches(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /watches command - list active watches."""
+        if not update.effective_user or not update.message:
+            return
+        if not self._is_authorized(update.effective_user.id):
+            return
+
+        user_id = update.effective_user.id
+        async with get_session() as session:
+            result = await session.execute(
+                select(WatchSubscription).where(
+                    WatchSubscription.user_id == user_id,
+                    WatchSubscription.active.is_(True),
+                )
+            )
+            subs = list(result.scalars().all())
+
+        if not subs:
+            await update.message.reply_text("Keine aktiven Watches.")
+            return
+
+        lines = ["*Aktive Watches:*\n"]
+        for sub in subs:
+            lines.append(f"#{sub.id} [{sub.watcher_type}] {sub.target}")
+        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+    async def cmd_autonomy(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /autonomy <level> command."""
+        if not update.effective_user or not update.message:
+            return
+        if not self._is_authorized(update.effective_user.id):
+            return
+
+        args = context.args or []
+        valid_levels = {"full", "ask", "manual"}
+
+        if not args or args[0].lower() not in valid_levels:
+            current = self.settings.autonomy_level if self.settings else "unknown"
+            await update.message.reply_text(
+                f"Aktuelles Level: *{current}*\n\nNutzung: /autonomy <level>\nLevel: full, ask, manual",
+                parse_mode="Markdown",
+            )
+            return
+
+        level = args[0].lower()
+        if self.settings:
+            self.settings.autonomy_level = level
+        await update.message.reply_text(f"Autonomie-Level auf *{level}* gesetzt.", parse_mode="Markdown")
 
     async def on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle free-form text messages."""

@@ -20,6 +20,7 @@ from openclaw.llm.router import LLMRouter
 from openclaw.memory.long_term import LongTermMemory
 from openclaw.memory.vector_store import VectorStore
 from openclaw.research.engine import ResearchEngine
+from openclaw.scheduler.manager import SchedulerManager
 from openclaw.security.budget import TokenBudget
 from openclaw.security.logging import setup_secure_logging
 from openclaw.telegram.bot import FochsTelegramBot
@@ -29,6 +30,7 @@ from openclaw.tools.google_search import GoogleSearchTool
 from openclaw.tools.memory_tools import RecallMemoryTool, StoreMemoryTool
 from openclaw.tools.registry import ToolRegistry
 from openclaw.tools.rss_tools import CheckFeedTool
+from openclaw.tools.scheduler_tools import ListWatchesTool, UnwatchTool, WatchTool
 from openclaw.tools.web_scrape import WebScrapeTool
 from openclaw.tools.web_search import WebSearchTool
 
@@ -47,9 +49,13 @@ class FochsApp:
         self.budget: TokenBudget | None = None
         self.research: ResearchEngine | None = None
         self.memory: LongTermMemory | None = None
+        self.scheduler: SchedulerManager | None = None
         self._brave: BraveSearchClient | None = None
         self._gemini: GeminiLLM | None = None
         self._scraper: WebScrapeTool | None = None
+        self._github: GitHubClient | None = None
+        self._email: EmailClient | None = None
+        self._rss: RSSClient | None = None
 
     def _ensure_data_dirs(self) -> None:
         """Create data directories if they don't exist."""
@@ -116,14 +122,14 @@ class FochsApp:
         # Phase 3: GitHub, Email, RSS tools
         gh_token = self.settings.github_token.get_secret_value()
         if gh_token:
-            gh_client = GitHubClient(token=gh_token)
-            registry.register(GitHubRepoTool(client=gh_client))
-            registry.register(GitHubIssuesTool(client=gh_client))
-            registry.register(GitHubCreateIssueTool(client=gh_client))
+            self._github = GitHubClient(token=gh_token)
+            registry.register(GitHubRepoTool(client=self._github))
+            registry.register(GitHubIssuesTool(client=self._github))
+            registry.register(GitHubCreateIssueTool(client=self._github))
             logger.info("tool_configured", tool="github")
 
         if self.settings.email_address and self.settings.email_imap_host:
-            email_client = EmailClient(
+            self._email = EmailClient(
                 EmailConfig(
                     address=self.settings.email_address,
                     password=self.settings.email_password.get_secret_value(),
@@ -131,17 +137,22 @@ class FochsApp:
                     smtp_host=self.settings.email_smtp_host,
                 )
             )
-            registry.register(ReadEmailsTool(client=email_client))
+            registry.register(ReadEmailsTool(client=self._email))
             if self.settings.email_smtp_host:
-                registry.register(SendEmailTool(client=email_client))
+                registry.register(SendEmailTool(client=self._email))
             logger.info("tool_configured", tool="email")
 
-        rss_client = RSSClient()
-        registry.register(CheckFeedTool(client=rss_client))
+        self._rss = RSSClient()
+        registry.register(CheckFeedTool(client=self._rss))
         logger.info("tool_configured", tool="rss")
 
+        # Phase 5: Scheduler tools
+        registry.register(WatchTool())
+        registry.register(UnwatchTool())
+        registry.register(ListWatchesTool())
+        logger.info("tool_configured", tool="scheduler")
+
         # Phase 4: Memory tools (registered after memory is initialized in start())
-        # TODO Phase 5: scheduler_tools
         # TODO Phase 6: sub_agent_tools
 
         return registry
@@ -213,11 +224,24 @@ class FochsApp:
                 agent=self.agent,
                 allowed_users=self.settings.telegram_allowed_users,
                 research=self.research,
+                settings=self.settings,
             )
             logger.info("telegram_bot_starting")
             await self.telegram.app.initialize()
             await self.telegram.app.start()
             await self.telegram.app.updater.start_polling()  # type: ignore[union-attr]
+
+            # Start scheduler (background watchers)
+            self.scheduler = SchedulerManager(
+                telegram=self.telegram,
+                settings=self.settings,
+                brave=self._brave,
+                github=self._github,
+                rss=self._rss,
+                email=self._email,
+            )
+            await self.scheduler.start()
+
             logger.info("fochs_ready", telegram=True)
 
             # Keep running
@@ -226,6 +250,8 @@ class FochsApp:
             except (KeyboardInterrupt, SystemExit):
                 logger.info("fochs_shutting_down")
             finally:
+                if self.scheduler:
+                    await self.scheduler.stop()
                 await self.telegram.app.updater.stop()  # type: ignore[union-attr]
                 await self.telegram.app.stop()
                 await self.telegram.app.shutdown()
