@@ -116,7 +116,7 @@ class FochsAgent:
             budget_status = self.llm.budget.get_status()
         memory_stats = {}
         if self.memory:
-            memory_stats = self.memory.get_stats()
+            memory_stats = await self.memory.get_stats()
         return {
             "status": "running",
             "tools": self.tools.tool_names,

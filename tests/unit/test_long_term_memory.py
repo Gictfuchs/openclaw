@@ -78,7 +78,7 @@ class TestLongTermMemory:
         await memory.store_message(user_id=1, role="user", content="Hello")
         await memory.store_knowledge(category="fact", key="test", value="value")
 
-        stats = memory.get_stats()
+        stats = await memory.get_stats()
         assert stats["conversations"] == 1
         assert stats["knowledge"] == 1
         assert stats["research"] == 0

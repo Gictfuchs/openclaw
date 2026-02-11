@@ -1,4 +1,9 @@
-"""Long-term memory: persistent storage + semantic search."""
+"""Long-term memory: persistent storage + semantic search.
+
+When ChromaDB is unavailable (Python 3.14 compat), recall falls back to
+SQLite LIKE-based text search.  Less precise than semantic search but
+keeps the memory system fully functional.
+"""
 
 from __future__ import annotations
 
@@ -6,7 +11,7 @@ import json
 from typing import Any
 
 import structlog
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from openclaw.db.engine import get_session
 from openclaw.memory.models import ConversationMessage, KnowledgeEntry, ResearchRecord
@@ -20,10 +25,14 @@ class LongTermMemory:
 
     SQLite stores the authoritative data.
     ChromaDB indexes it for semantic similarity search.
+
+    When ChromaDB is unavailable, recall methods fall back to SQLite
+    LIKE-based text search so the agent still has a working memory.
     """
 
     def __init__(self, vector_store: VectorStore) -> None:
         self._vectors = vector_store
+        self._use_vectors = vector_store._available
 
     async def store_message(self, user_id: int, role: str, content: str) -> None:
         """Store a conversation message in both SQLite and ChromaDB."""
@@ -116,8 +125,22 @@ class LongTermMemory:
             doc_id=f"research_{record_id}",
         )
 
+    # ------------------------------------------------------------------
+    # Recall: ChromaDB semantic search with SQLite LIKE fallback
+    # ------------------------------------------------------------------
+
     async def recall(self, query: str, n_results: int = 5) -> list[dict[str, Any]]:
-        """Semantic search across all memory collections."""
+        """Search across all memory collections.
+
+        Uses ChromaDB semantic search when available, otherwise falls back
+        to SQLite LIKE-based text search.
+        """
+        if self._use_vectors:
+            return await self._recall_vector(query, n_results)
+        return await self._recall_sqlite(query, n_results)
+
+    async def _recall_vector(self, query: str, n_results: int) -> list[dict[str, Any]]:
+        """Semantic search via ChromaDB."""
         results: list[dict[str, Any]] = []
 
         for collection_name in [KNOWLEDGE, CONVERSATIONS, RESEARCH]:
@@ -130,8 +153,76 @@ class LongTermMemory:
                 item["collection"] = collection_name
                 results.append(item)
 
-        # Sort by relevance (lower distance = more similar)
         results.sort(key=lambda x: x.get("distance", 1.0))
+        return results[:n_results]
+
+    async def _recall_sqlite(self, query: str, n_results: int) -> list[dict[str, Any]]:
+        """Fallback: LIKE-based text search across SQLite tables."""
+        results: list[dict[str, Any]] = []
+        pattern = f"%{query}%"
+
+        async with get_session() as session:
+            # Search knowledge entries (key + value)
+            stmt = (
+                select(KnowledgeEntry)
+                .where(
+                    (KnowledgeEntry.key.ilike(pattern)) | (KnowledgeEntry.value.ilike(pattern)),
+                )
+                .order_by(KnowledgeEntry.updated_at.desc())
+                .limit(n_results)
+            )
+            result = await session.execute(stmt)
+            for entry in result.scalars().all():
+                results.append(
+                    {
+                        "document": f"{entry.key}: {entry.value}",
+                        "collection": KNOWLEDGE,
+                        "metadata": {"category": entry.category, "source": entry.source},
+                        "distance": 0.5,
+                        "id": f"know_{entry.id}",
+                    }
+                )
+
+            # Search conversations
+            stmt = (
+                select(ConversationMessage)
+                .where(ConversationMessage.content.ilike(pattern))
+                .order_by(ConversationMessage.created_at.desc())
+                .limit(n_results)
+            )
+            result = await session.execute(stmt)
+            for msg in result.scalars().all():
+                results.append(
+                    {
+                        "document": msg.content,
+                        "collection": CONVERSATIONS,
+                        "metadata": {"user_id": msg.user_id, "role": msg.role},
+                        "distance": 0.5,
+                        "id": f"msg_{msg.id}",
+                    }
+                )
+
+            # Search research records
+            stmt = (
+                select(ResearchRecord)
+                .where(
+                    (ResearchRecord.query.ilike(pattern)) | (ResearchRecord.summary.ilike(pattern)),
+                )
+                .order_by(ResearchRecord.created_at.desc())
+                .limit(n_results)
+            )
+            result = await session.execute(stmt)
+            for rec in result.scalars().all():
+                results.append(
+                    {
+                        "document": f"{rec.query}\n{rec.summary}",
+                        "collection": RESEARCH,
+                        "metadata": {"user_id": rec.user_id or 0},
+                        "distance": 0.5,
+                        "id": f"research_{rec.id}",
+                    }
+                )
+
         return results[:n_results]
 
     async def recall_knowledge(
@@ -141,13 +232,36 @@ class LongTermMemory:
         n_results: int = 5,
     ) -> list[dict[str, Any]]:
         """Search specifically in knowledge entries."""
-        where = {"category": category} if category else None
-        return self._vectors.query(
-            collection=KNOWLEDGE,
-            query_text=query,
-            n_results=n_results,
-            where=where,
-        )
+        if self._use_vectors:
+            where = {"category": category} if category else None
+            return self._vectors.query(
+                collection=KNOWLEDGE,
+                query_text=query,
+                n_results=n_results,
+                where=where,
+            )
+
+        # SQLite fallback
+        pattern = f"%{query}%"
+        async with get_session() as session:
+            stmt = select(KnowledgeEntry).where(
+                (KnowledgeEntry.key.ilike(pattern)) | (KnowledgeEntry.value.ilike(pattern)),
+            )
+            if category:
+                stmt = stmt.where(KnowledgeEntry.category == category)
+            stmt = stmt.order_by(KnowledgeEntry.updated_at.desc()).limit(n_results)
+
+            result = await session.execute(stmt)
+            return [
+                {
+                    "document": f"{e.key}: {e.value}",
+                    "collection": KNOWLEDGE,
+                    "metadata": {"category": e.category, "source": e.source},
+                    "distance": 0.5,
+                    "id": f"know_{e.id}",
+                }
+                for e in result.scalars().all()
+            ]
 
     async def get_recent_messages(self, user_id: int, limit: int = 20) -> list[dict[str, str]]:
         """Get recent conversation messages from SQLite."""
@@ -164,10 +278,14 @@ class LongTermMemory:
         # Reverse to chronological order
         return [{"role": m.role, "content": m.content} for m in reversed(messages)]
 
-    def get_stats(self) -> dict[str, int]:
-        """Get memory statistics."""
+    async def get_stats(self) -> dict[str, int]:
+        """Get memory statistics from SQLite (always accurate)."""
+        async with get_session() as session:
+            conv_count = (await session.execute(select(func.count(ConversationMessage.id)))).scalar() or 0
+            know_count = (await session.execute(select(func.count(KnowledgeEntry.id)))).scalar() or 0
+            research_count = (await session.execute(select(func.count(ResearchRecord.id)))).scalar() or 0
         return {
-            "conversations": self._vectors.count(CONVERSATIONS),
-            "knowledge": self._vectors.count(KNOWLEDGE),
-            "research": self._vectors.count(RESEARCH),
+            "conversations": conv_count,
+            "knowledge": know_count,
+            "research": research_count,
         }
