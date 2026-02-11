@@ -57,17 +57,35 @@ class BaseWatcher(ABC):
         return self._task is not None and not self._task.done()
 
     async def _run_loop(self) -> None:
-        """Main loop: check, sleep, repeat."""
+        """Main loop: check, sleep, repeat.
+
+        Uses exponential backoff on consecutive errors to avoid hammering
+        failing APIs and filling logs.
+        """
         # Small initial delay to let everything start up
         await asyncio.sleep(5)
+        consecutive_errors = 0
+        max_backoff = 3600  # Cap at 1 hour
         while True:
             try:
                 await self.check_and_notify()
+                consecutive_errors = 0  # Reset on success
             except asyncio.CancelledError:
                 raise
             except Exception as e:
-                logger.error("watcher_error", watcher=self.watcher_type, error=str(e))
-            await asyncio.sleep(self.interval)
+                consecutive_errors += 1
+                logger.error(
+                    "watcher_error",
+                    watcher=self.watcher_type,
+                    error=str(e),
+                    consecutive_errors=consecutive_errors,
+                )
+            # Exponential backoff: interval * 2^(errors-1), capped
+            if consecutive_errors > 0:
+                backoff = min(self.interval * (2 ** (consecutive_errors - 1)), max_backoff)
+                await asyncio.sleep(backoff)
+            else:
+                await asyncio.sleep(self.interval)
 
     async def send_notification(self, user_id: int, message: str) -> bool:
         """Send a proactive notification respecting autonomy and budget.
