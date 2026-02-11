@@ -122,4 +122,4 @@ class AgentLoop:
 
             messages.append({"role": "user", "content": tool_results})
 
-        yield ErrorEvent(message=f"Max iterations ({self.max_iterations}) reached")
+        yield ErrorEvent(message=f"Max iterations ({self.max_iterations}) reached", recoverable=False)

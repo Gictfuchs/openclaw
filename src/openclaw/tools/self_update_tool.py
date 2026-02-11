@@ -66,7 +66,7 @@ class SelfUpdateTool(BaseTool):
 
     async def execute(self, **kwargs: Any) -> str:
         """Execute self-update sequence."""
-        confirm: bool = kwargs.get("confirm", False)
+        confirm: bool = kwargs["confirm"]
         show_diff_only: bool = kwargs.get("show_diff_only", False)
 
         # Security: only standard or unrestricted

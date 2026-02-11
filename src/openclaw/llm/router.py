@@ -93,7 +93,7 @@ class LLMRouter:
             # Record token usage
             tokens_used = response.usage.total_tokens if response.usage else 0
             if self.budget and tokens_used:
-                self.budget.record_usage(tokens_used, provider=provider.provider_name)
+                await self.budget.record_usage(tokens_used, provider=provider.provider_name)
 
             logger.info(
                 "llm_response",
@@ -187,9 +187,9 @@ class LLMRouter:
                 # Record fallback usage too
                 tokens_used = response.usage.total_tokens if response.usage else 0
                 if self.budget and tokens_used:
-                    self.budget.record_usage(tokens_used, provider=provider.provider_name)
+                    await self.budget.record_usage(tokens_used, provider=provider.provider_name)
                 return response
-            except (TimeoutError, Exception) as e:
+            except Exception as e:
                 logger.warning("llm_fallback_failed", provider=provider.provider_name, error=str(e))
                 continue
 

@@ -65,10 +65,11 @@ class ToolRegistry:
 
         try:
             result = await tool.execute(**input_data)
-            # Truncate oversized results
-            if len(result) > _MAX_RESULT_LENGTH:
+            # Capture original length before truncation for logging
+            original_length = len(result)
+            if original_length > _MAX_RESULT_LENGTH:
                 result = result[:_MAX_RESULT_LENGTH] + f"\n[truncated at {_MAX_RESULT_LENGTH} chars]"
-            logger.info("tool_executed", tool=name, result_length=len(result))
+            logger.info("tool_executed", tool=name, result_length=original_length)
             return result
         except Exception as e:
             error_msg = f"Error executing tool '{name}': {type(e).__name__}: {e}"

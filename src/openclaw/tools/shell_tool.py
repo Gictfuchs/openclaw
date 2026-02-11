@@ -103,6 +103,9 @@ class ShellExecuteTool(BaseTool):
                 timeout=timeout,
             )
         except TimeoutError:
+            # Kill the timed-out subprocess to prevent zombie processes
+            proc.kill()
+            await proc.wait()
             err = f"Befehl abgebrochen nach {timeout}s Timeout."
             self._guard.audit_log(command, exit_code=-1, output_length=0, error=err)
             return err

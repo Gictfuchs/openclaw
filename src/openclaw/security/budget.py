@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import tempfile
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -21,6 +23,7 @@ class TokenBudget:
     - Sub-agents spawning unbounded work
 
     Optionally persists state to a JSON file so usage survives restarts.
+    Thread-safe via asyncio.Lock for concurrent coroutine access.
     """
 
     def __init__(
@@ -34,11 +37,13 @@ class TokenBudget:
         self.monthly_limit = monthly_limit
         self.per_run_limit = per_run_limit
         self._persist_path = Path(persist_path) if persist_path else None
+        self._lock = asyncio.Lock()
 
         self._daily_usage: int = 0
         self._monthly_usage: int = 0
         self._current_day: date = date.today()
         self._current_month: int = date.today().month
+        self._current_year: int = date.today().year
         self._killed: bool = False
 
         # Load persisted state if available
@@ -52,13 +57,14 @@ class TokenBudget:
             data = json.loads(self._persist_path.read_text(encoding="utf-8"))
             saved_day = date.fromisoformat(data.get("date", ""))
             saved_month = data.get("month", 0)
+            saved_year = data.get("year", 0)
             today = date.today()
 
             # Only restore if still same day
             if saved_day == today:
                 self._daily_usage = data.get("daily_usage", 0)
-            # Only restore monthly if still same month
-            if saved_month == today.month:
+            # Only restore monthly if still same month AND same year
+            if saved_month == today.month and saved_year == today.year:
                 self._monthly_usage = data.get("monthly_usage", 0)
 
             logger.info(
@@ -70,7 +76,7 @@ class TokenBudget:
             logger.warning("budget_state_load_failed", error=str(e))
 
     def _save_state(self) -> None:
-        """Persist budget state to file."""
+        """Persist budget state to file (atomic write to prevent corruption)."""
         if not self._persist_path:
             return
         try:
@@ -80,8 +86,19 @@ class TokenBudget:
                 "monthly_usage": self._monthly_usage,
                 "date": str(self._current_day),
                 "month": self._current_month,
+                "year": self._current_year,
             }
-            self._persist_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            # Atomic write: write to temp file then rename
+            tmp_fd, tmp_path = tempfile.mkstemp(dir=str(self._persist_path.parent), suffix=".tmp")
+            try:
+                import os
+
+                os.write(tmp_fd, json.dumps(data, indent=2).encode("utf-8"))
+                os.close(tmp_fd)
+                Path(tmp_path).replace(self._persist_path)
+            except Exception:
+                Path(tmp_path).unlink(missing_ok=True)
+                raise
         except Exception as e:
             logger.warning("budget_state_save_failed", error=str(e))
 
@@ -92,11 +109,14 @@ class TokenBudget:
             logger.info("budget_daily_reset", previous_usage=self._daily_usage)
             self._daily_usage = 0
             self._current_day = today
-        if today.month != self._current_month:
+        if today.month != self._current_month or today.year != self._current_year:
             logger.info("budget_monthly_reset", previous_usage=self._monthly_usage)
             self._monthly_usage = 0
             self._current_month = today.month
-            self._killed = False  # Reset kill switch on new month
+            self._current_year = today.year
+            if self._killed:
+                logger.warning("budget_kill_switch_auto_reset", msg="Kill switch reset on month boundary")
+            self._killed = False
 
     def check_budget(self, estimated_tokens: int = 0) -> bool:
         """Check if we can afford the estimated token cost. Returns True if OK."""
@@ -115,19 +135,20 @@ class TokenBudget:
         """Check if a single run has exceeded its token limit."""
         return run_tokens <= self.per_run_limit
 
-    def record_usage(self, tokens: int, provider: str = "") -> None:
-        """Record token usage after an API call."""
-        self._rotate_if_needed()
-        self._daily_usage += tokens
-        self._monthly_usage += tokens
-        if self._daily_usage > self.daily_limit:
-            logger.error("budget_kill_switch", reason="daily_limit", usage=self._daily_usage)
-            self._killed = True
-        if self._monthly_usage > self.monthly_limit:
-            logger.error("budget_kill_switch", reason="monthly_limit", usage=self._monthly_usage)
-            self._killed = True
-        # Persist after every usage update
-        self._save_state()
+    async def record_usage(self, tokens: int, provider: str = "") -> None:
+        """Record token usage after an API call (async-safe)."""
+        async with self._lock:
+            self._rotate_if_needed()
+            self._daily_usage += tokens
+            self._monthly_usage += tokens
+            if self._daily_usage > self.daily_limit:
+                logger.error("budget_kill_switch", reason="daily_limit", usage=self._daily_usage)
+                self._killed = True
+            if self._monthly_usage > self.monthly_limit:
+                logger.error("budget_kill_switch", reason="monthly_limit", usage=self._monthly_usage)
+                self._killed = True
+            # Persist after every usage update
+            self._save_state()
 
     def kill(self) -> None:
         """Emergency kill switch - stop all API calls."""

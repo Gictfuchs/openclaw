@@ -34,7 +34,7 @@ def create_app(settings: Settings, app_state: dict[str, Any]) -> FastAPI:
     # Session middleware for cookie-based auth
     web_app.add_middleware(
         SessionMiddleware,
-        secret_key=settings.web_secret_key.get_secret_value(),
+        secret_key=settings.web_session_key.get_secret_value(),
         https_only=not settings.debug,
         same_site="lax",
     )

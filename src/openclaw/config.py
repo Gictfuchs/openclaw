@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     web_host: str = "127.0.0.1"
     web_port: int = Field(default=8080, ge=1, le=65535)
     web_secret_key: SecretStr = Field(default_factory=lambda: SecretStr(secrets.token_hex(32)))
+    web_session_key: SecretStr = Field(default_factory=lambda: SecretStr(secrets.token_hex(32)))
     debug: bool = False
 
     # --- Agent ---

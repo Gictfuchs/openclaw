@@ -97,6 +97,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return JSONResponse(
                 {"error": "Rate limit exceeded", "retry_after_seconds": 60},
                 status_code=429,
+                headers={"Retry-After": "60"},
             )
 
         timestamps.append(now)

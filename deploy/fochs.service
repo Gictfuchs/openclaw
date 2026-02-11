@@ -13,7 +13,8 @@ EnvironmentFile=/opt/fochs/.env
 ExecStart=/opt/fochs/.venv/bin/python -m openclaw
 Restart=on-failure
 RestartSec=10
-WatchdogSec=120
+# WatchdogSec requires sd_notify integration — enable only after implementing it
+# WatchdogSec=120
 
 # Logging
 StandardOutput=journal
@@ -25,6 +26,17 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only
 PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+SystemCallArchitectures=native
 ReadWritePaths=/opt/fochs/data /opt/fochs/plugins /tmp/fochs
 
 # Resource limits

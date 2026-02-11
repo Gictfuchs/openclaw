@@ -101,11 +101,17 @@ class PluginLoader:
 
         module = types.ModuleType(module_name)
         module.__file__ = str(py_file)
-        sys.modules[module_name] = module
 
         # Execute the source in the module namespace
         code = compile(source, str(py_file), "exec")
-        exec(code, module.__dict__)  # noqa: S102
+        try:
+            exec(code, module.__dict__)  # noqa: S102
+        except Exception:
+            # Don't leave a broken module in sys.modules
+            sys.modules.pop(module_name, None)
+            raise
+        # Only register the module after successful exec
+        sys.modules[module_name] = module
 
         # Find all BaseTool subclasses
         loaded: list[str] = []

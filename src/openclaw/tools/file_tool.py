@@ -48,13 +48,12 @@ class FileReadTool(BaseTool):
         """Read a file or list a directory."""
         path_str: str = kwargs["path"]
 
-        # Security: validate path
-        error = self._guard.validate_path(path_str)
-        if error:
-            logger.warning("file_read_blocked", path=path_str, error=error)
-            return f"BLOCKIERT: {error}"
-
+        # Security: resolve FIRST to prevent symlink/traversal bypasses, then validate
         path = Path(path_str).resolve()
+        error = self._guard.validate_path(str(path))
+        if error:
+            logger.warning("file_read_blocked", path=path_str, resolved=str(path), error=error)
+            return f"BLOCKIERT: {error}"
 
         if not path.exists():
             return f"Pfad existiert nicht: {path}"
@@ -154,13 +153,12 @@ class FileWriteTool(BaseTool):
         if self._guard.mode == "restricted":
             return "BLOCKIERT: Datei-Schreiben ist im restricted-Modus nicht erlaubt."
 
-        # Security: validate path
-        error = self._guard.validate_path(path_str)
-        if error:
-            logger.warning("file_write_blocked", path=path_str, error=error)
-            return f"BLOCKIERT: {error}"
-
+        # Security: resolve FIRST to prevent symlink/traversal bypasses, then validate
         path = Path(path_str).resolve()
+        error = self._guard.validate_path(str(path))
+        if error:
+            logger.warning("file_write_blocked", path=path_str, resolved=str(path), error=error)
+            return f"BLOCKIERT: {error}"
 
         # Create parent directories if needed
         try:
