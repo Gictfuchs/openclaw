@@ -2,12 +2,7 @@
 
 import pytest
 
-try:
-    from openclaw.memory.vector_store import CONVERSATIONS, KNOWLEDGE, RESEARCH, VectorStore
-
-    HAS_CHROMADB = True
-except Exception:
-    HAS_CHROMADB = False
+from openclaw.memory.vector_store import CONVERSATIONS, HAS_CHROMADB, KNOWLEDGE, RESEARCH, VectorStore
 
 pytestmark = pytest.mark.skipif(not HAS_CHROMADB, reason="chromadb not compatible with this Python version")
 

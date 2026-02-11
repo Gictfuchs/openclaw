@@ -1,11 +1,23 @@
-"""ChromaDB vector store for semantic memory."""
+"""ChromaDB vector store for semantic memory.
+
+Falls back to a no-op stub when ChromaDB is unavailable (e.g. Python 3.14
+where ChromaDB's pydantic-v1 dependency is broken).  SQLite-backed memory
+still works; only semantic vector search is disabled.
+"""
 
 from __future__ import annotations
 
 from typing import Any
 
-import chromadb
 import structlog
+
+try:
+    import chromadb
+
+    HAS_CHROMADB = True
+except Exception:  # noqa: BLE001
+    chromadb = None  # type: ignore[assignment]
+    HAS_CHROMADB = False
 
 logger = structlog.get_logger()
 
@@ -22,11 +34,20 @@ class VectorStore:
     - conversations: past conversation messages for context retrieval
     - knowledge: learned facts, preferences, entities
     - research: stored research summaries and findings
+
+    When ChromaDB is unavailable the store operates as a silent no-op:
+    add() succeeds (returns a synthetic id), query() returns [], count() returns 0.
     """
 
     def __init__(self, persist_dir: str) -> None:
+        self._available = HAS_CHROMADB
+        self._collections: dict[str, Any] = {}
+
+        if not self._available:
+            logger.warning("vector_store_disabled", reason="chromadb not available (Python 3.14 compat)")
+            return
+
         self._client = chromadb.PersistentClient(path=persist_dir)
-        self._collections: dict[str, chromadb.Collection] = {}
 
         # Initialize collections
         for name in [CONVERSATIONS, KNOWLEDGE, RESEARCH]:
@@ -44,6 +65,9 @@ class VectorStore:
         doc_id: str | None = None,
     ) -> str:
         """Add a document to a collection. Returns the document ID."""
+        if not self._available:
+            return doc_id or f"{collection}_noop"
+
         coll = self._collections[collection]
         if doc_id is None:
             doc_id = f"{collection}_{coll.count()}"
@@ -66,6 +90,9 @@ class VectorStore:
 
         Returns list of dicts with 'document', 'metadata', 'distance', 'id'.
         """
+        if not self._available:
+            return []
+
         coll = self._collections[collection]
         if coll.count() == 0:
             return []
@@ -94,8 +121,12 @@ class VectorStore:
 
     def count(self, collection: str) -> int:
         """Get the number of documents in a collection."""
+        if not self._available:
+            return 0
         return self._collections[collection].count()
 
     def delete(self, collection: str, doc_ids: list[str]) -> None:
         """Delete documents by ID."""
+        if not self._available:
+            return
         self._collections[collection].delete(ids=doc_ids)

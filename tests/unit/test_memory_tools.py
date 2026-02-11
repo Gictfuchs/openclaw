@@ -1,27 +1,19 @@
-"""Tests for memory tools."""
+"""Tests for memory tools.
+
+These tests use mocked LongTermMemory and do NOT require a working ChromaDB.
+"""
 
 from unittest.mock import AsyncMock
 
 import pytest
 
-try:
-    from openclaw.memory.long_term import LongTermMemory
-
-    HAS_CHROMADB = True
-except Exception:
-    HAS_CHROMADB = False
-
-pytestmark = pytest.mark.skipif(not HAS_CHROMADB, reason="chromadb not compatible with this Python version")
-
-if HAS_CHROMADB:
-    from openclaw.tools.memory_tools import RecallMemoryTool, StoreMemoryTool
+from openclaw.memory.long_term import LongTermMemory
+from openclaw.tools.memory_tools import RecallMemoryTool, StoreMemoryTool
 
 
 @pytest.fixture
 def mock_memory():
-    if HAS_CHROMADB:
-        return AsyncMock(spec=LongTermMemory)
-    return AsyncMock()
+    return AsyncMock(spec=LongTermMemory)
 
 
 class TestRecallMemoryTool:

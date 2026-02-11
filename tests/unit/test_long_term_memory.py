@@ -2,14 +2,9 @@
 
 import pytest
 
-try:
-    from openclaw.db.engine import close_db, init_db
-    from openclaw.memory.long_term import LongTermMemory
-    from openclaw.memory.vector_store import VectorStore
-
-    HAS_CHROMADB = True
-except Exception:
-    HAS_CHROMADB = False
+from openclaw.db.engine import close_db, init_db
+from openclaw.memory.long_term import LongTermMemory
+from openclaw.memory.vector_store import HAS_CHROMADB, VectorStore
 
 pytestmark = pytest.mark.skipif(not HAS_CHROMADB, reason="chromadb not compatible with this Python version")
 
