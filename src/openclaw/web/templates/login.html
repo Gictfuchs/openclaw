@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+
+{% block title %}Login - Fochs{% endblock %}
+
+{% block content %}
+<div class="login-card">
+    <h1>Fochs Dashboard</h1>
+    <p class="subtitle">Gib den Schluessel ein, um fortzufahren.</p>
+    {% if error %}
+    <div class="alert error">{{ error }}</div>
+    {% endif %}
+    <form method="post" action="/login">
+        <input type="password" name="secret_key" placeholder="Schluessel" autofocus required>
+        <button type="submit">Anmelden</button>
+    </form>
+</div>
+{% endblock %}

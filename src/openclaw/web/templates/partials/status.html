@@ -1,0 +1,91 @@
+<div class="status-grid">
+    <!-- Agent Status -->
+    <div class="status-card">
+        <h3>Agent</h3>
+        <dl>
+            <dt>Status</dt>
+            <dd class="badge badge-ok">{{ status.get("status", "unbekannt") }}</dd>
+            <dt>Aktive Gespraeche</dt>
+            <dd>{{ status.get("active_conversations", 0) }}</dd>
+        </dl>
+    </div>
+
+    <!-- LLM Providers -->
+    {% if status.get("llm_providers") %}
+    <div class="status-card">
+        <h3>LLM Provider</h3>
+        <dl>
+            {% for name, available in status.llm_providers.items() %}
+            <dt>{{ name }}</dt>
+            <dd class="badge {{ 'badge-ok' if available else 'badge-err' }}">
+                {{ "online" if available else "offline" }}
+            </dd>
+            {% endfor %}
+        </dl>
+    </div>
+    {% endif %}
+
+    <!-- Budget -->
+    {% if status.get("budget") %}
+    <div class="status-card">
+        <h3>Token Budget</h3>
+        <dl>
+            <dt>Heute</dt>
+            <dd>{{ status.budget.get("daily_used", 0) | int }} / {{ status.budget.get("daily_limit", 0) | int }}</dd>
+            <dt>Monat</dt>
+            <dd>{{ status.budget.get("monthly_used", 0) | int }} / {{ status.budget.get("monthly_limit", 0) | int }}</dd>
+        </dl>
+    </div>
+    {% endif %}
+
+    <!-- Memory -->
+    {% if status.get("memory") %}
+    <div class="status-card">
+        <h3>Speicher</h3>
+        <dl>
+            <dt>Konversationen</dt>
+            <dd>{{ status.memory.get("conversations", 0) }}</dd>
+            <dt>Wissen</dt>
+            <dd>{{ status.memory.get("knowledge", 0) }}</dd>
+            <dt>Recherchen</dt>
+            <dd>{{ status.memory.get("research", 0) }}</dd>
+        </dl>
+    </div>
+    {% endif %}
+
+    <!-- Scheduler -->
+    {% if status.get("scheduler") %}
+    <div class="status-card">
+        <h3>Scheduler</h3>
+        <dl>
+            <dt>Aktive Watcher</dt>
+            <dd>{{ status.scheduler.get("active_watchers", 0) }}</dd>
+        </dl>
+    </div>
+    {% endif %}
+
+    <!-- Sub-Agents -->
+    {% if status.get("sub_agents") %}
+    <div class="status-card">
+        <h3>Sub-Agenten</h3>
+        <dl>
+            <dt>Aktiv</dt>
+            <dd>{{ status.sub_agents.get("active", 0) }} / {{ status.sub_agents.get("max_concurrent", 3) }}</dd>
+            <dt>Typen</dt>
+            <dd>{{ status.sub_agents.get("available_types", []) | join(", ") }}</dd>
+        </dl>
+    </div>
+    {% endif %}
+
+    <!-- Tools -->
+    {% if status.get("tools") %}
+    <div class="status-card wide">
+        <h3>Tools ({{ status.tools | length }})</h3>
+        <div class="tool-list">
+            {% for tool in status.tools %}
+            <span class="tool-tag">{{ tool }}</span>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+</div>

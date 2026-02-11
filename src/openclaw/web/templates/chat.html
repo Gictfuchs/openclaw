@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+
+{% block title %}Chat - Fochs{% endblock %}
+
+{% block content %}
+<div class="chat-container">
+    <div id="chat-messages" class="chat-messages"></div>
+    <form id="chat-form" class="chat-input-bar">
+        <input type="text" id="chat-input" placeholder="Nachricht an Fochs..." autocomplete="off" autofocus>
+        <button type="submit" id="send-btn">Senden</button>
+    </form>
+    <div id="connection-status" class="connection-status">Verbinde...</div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/chat.js"></script>
+{% endblock %}

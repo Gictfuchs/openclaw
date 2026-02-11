@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Fochs{% endblock %}
+
+{% block content %}
+<h1>Dashboard</h1>
+
+<div id="status-panel"
+     hx-get="/api/status"
+     hx-trigger="load, every 10s"
+     hx-swap="innerHTML">
+    <p class="loading">Lade Status...</p>
+</div>
+{% endblock %}

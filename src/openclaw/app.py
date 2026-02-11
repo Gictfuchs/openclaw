@@ -35,6 +35,7 @@ from openclaw.tools.rss_tools import CheckFeedTool
 from openclaw.tools.scheduler_tools import ListWatchesTool, UnwatchTool, WatchTool
 from openclaw.tools.web_scrape import WebScrapeTool
 from openclaw.tools.web_search import WebSearchTool
+from openclaw.web.server import start_web_server
 
 logger = structlog.get_logger()
 
@@ -224,6 +225,13 @@ class FochsApp:
             status = "available" if available else "unavailable"
             logger.info("llm_status", provider=provider, status=status)
 
+        # Build app_state dict for web dashboard
+        app_state = {
+            "agent": self.agent,
+            "scheduler": self.scheduler,  # May be set below
+            "sub_agent_runner": self.sub_agent_runner,
+        }
+
         # Start Telegram bot
         token = self.settings.telegram_bot_token.get_secret_value()
         if token:
@@ -249,20 +257,32 @@ class FochsApp:
                 email=self._email,
             )
             await self.scheduler.start()
+            app_state["scheduler"] = self.scheduler
 
             logger.info("fochs_ready", telegram=True)
+        else:
+            logger.warning(
+                "no_telegram_token",
+                msg="FOCHS_TELEGRAM_BOT_TOKEN not set - running web dashboard only",
+            )
 
-            # Keep running
-            try:
-                await asyncio.Event().wait()
-            except (KeyboardInterrupt, SystemExit):
-                logger.info("fochs_shutting_down")
-            finally:
-                if self.scheduler:
-                    await self.scheduler.stop()
+        # Start web dashboard (runs in background)
+        web_task = asyncio.create_task(
+            start_web_server(self.settings, app_state),
+            name="web_dashboard",
+        )
+
+        # Keep running
+        try:
+            await asyncio.Event().wait()
+        except (KeyboardInterrupt, SystemExit):
+            logger.info("fochs_shutting_down")
+        finally:
+            web_task.cancel()
+            if self.scheduler:
+                await self.scheduler.stop()
+            if self.telegram:
                 await self.telegram.app.updater.stop()  # type: ignore[union-attr]
                 await self.telegram.app.stop()
                 await self.telegram.app.shutdown()
-                await close_db()
-        else:
-            logger.error("no_telegram_token", msg="Set FOCHS_TELEGRAM_BOT_TOKEN in .env")
+            await close_db()
