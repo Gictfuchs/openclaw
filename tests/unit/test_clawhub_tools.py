@@ -268,6 +268,35 @@ class TestClawHubSecurityTool:
 class TestClawHubClientSecurity:
     """Test that the ClawHub client enforces security invariants."""
 
+    def _make_client(self, mock_vt: AsyncMock) -> ClawHubClient:
+        """Create a ClawHubClient with mocked HTTP transport."""
+        client = ClawHubClient(
+            api_key="test",
+            virustotal=mock_vt,
+            auto_scan=True,
+        )
+        # Replace the real httpx client with a mock
+        client._client = AsyncMock()
+        return client
+
+    def _make_skill_resp(self, data: dict) -> MagicMock:
+        """Create a mock httpx response with proper .content bytes."""
+        import json
+
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.raise_for_status = MagicMock()
+        resp.json.return_value = data
+        resp.content = json.dumps(data).encode()
+        return resp
+
+    def _make_blocklist_resp(self, data: dict) -> MagicMock:
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = data
+        resp.content = b"{}"
+        return resp
+
     async def test_install_blocks_on_vt_detection(self, mock_vt: AsyncMock) -> None:
         """Installation must be refused when VT detects malware."""
         mock_vt.scan_url.return_value = ScanResult(
@@ -277,28 +306,16 @@ class TestClawHubClientSecurity:
             is_safe=False,
         )
 
-        # Create a client with a mock httpx transport for the API calls
-        client = ClawHubClient.__new__(ClawHubClient)
-        client._api_key = "test"
-        client._base_url = "https://api.clawhub.ai/v1"
-        client._vt = mock_vt
-        client._auto_scan = True
-        client._client = AsyncMock()
+        client = self._make_client(mock_vt)
 
-        # Mock get_skill and blocklist check (MagicMock because httpx .json() is sync)
-        skill_resp = MagicMock()
-        skill_resp.status_code = 200
-        skill_resp.raise_for_status = MagicMock()
-        skill_resp.json.return_value = {
-            "id": "evil-tool",
-            "name": "Evil Tool",
-            "package_url": "https://pkg.clawhub.ai/evil",
-        }
-
-        blocklist_resp = MagicMock()
-        blocklist_resp.status_code = 200
-        blocklist_resp.json.return_value = {"blocked": False}
-
+        skill_resp = self._make_skill_resp(
+            {
+                "id": "evil-tool",
+                "name": "Evil Tool",
+                "package_url": "https://pkg.clawhub.ai/evil",
+            }
+        )
+        blocklist_resp = self._make_blocklist_resp({"blocked": False})
         client._client.get = AsyncMock(side_effect=[skill_resp, blocklist_resp])
 
         result = await client.install_skill("evil-tool")
@@ -310,29 +327,49 @@ class TestClawHubClientSecurity:
 
     async def test_install_blocks_on_blocklist(self, mock_vt: AsyncMock) -> None:
         """Installation must be refused when skill is on blocklist."""
-        client = ClawHubClient.__new__(ClawHubClient)
-        client._api_key = "test"
-        client._base_url = "https://api.clawhub.ai/v1"
-        client._vt = mock_vt
-        client._auto_scan = True
-        client._client = AsyncMock()
+        client = self._make_client(mock_vt)
 
-        skill_resp = MagicMock()
-        skill_resp.status_code = 200
-        skill_resp.raise_for_status = MagicMock()
-        skill_resp.json.return_value = {
-            "id": "havoc-tool",
-            "name": "Havoc Tool",
-            "package_url": "https://pkg.clawhub.ai/havoc",
-        }
-
-        blocklist_resp = MagicMock()
-        blocklist_resp.status_code = 200
-        blocklist_resp.json.return_value = {"blocked": True, "reason": "ClawHavoc confirmed malware"}
-
+        skill_resp = self._make_skill_resp(
+            {
+                "id": "havoc-tool",
+                "name": "Havoc Tool",
+                "package_url": "https://pkg.clawhub.ai/havoc",
+            }
+        )
+        blocklist_resp = self._make_blocklist_resp({"blocked": True, "reason": "ClawHavoc confirmed malware"})
         client._client.get = AsyncMock(side_effect=[skill_resp, blocklist_resp])
 
         result = await client.install_skill("havoc-tool")
         assert "BLOCKED" in result
         assert "ClawHavoc" in result
+        client._client.post.assert_not_called()
+
+    async def test_install_scans_even_when_auto_scan_false(self, mock_vt: AsyncMock) -> None:
+        """Security scan must run even when auto_scan=False (Runde-5 fix)."""
+        mock_vt.scan_url.return_value = ScanResult(
+            resource_id="https://pkg.clawhub.ai/evil",
+            positives=5,
+            total=70,
+            is_safe=False,
+        )
+
+        client = ClawHubClient(
+            api_key="test",
+            virustotal=mock_vt,
+            auto_scan=False,
+        )
+        client._client = AsyncMock()
+
+        skill_resp = self._make_skill_resp(
+            {
+                "id": "evil-tool",
+                "name": "Evil Tool",
+                "package_url": "https://pkg.clawhub.ai/evil",
+            }
+        )
+        blocklist_resp = self._make_blocklist_resp({"blocked": False})
+        client._client.get = AsyncMock(side_effect=[skill_resp, blocklist_resp])
+
+        result = await client.install_skill("evil-tool")
+        assert "BLOCKED" in result
         client._client.post.assert_not_called()

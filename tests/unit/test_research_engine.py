@@ -102,5 +102,6 @@ class TestResearchEngine:
         formatted = result.format()
 
         assert "Recherche: test" in formatted
+        assert "Zusammenfassung" in formatted  # LLM summary must appear
         assert "Sources:" in formatted
         assert "https://a.com" in formatted
