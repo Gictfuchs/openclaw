@@ -157,9 +157,15 @@ class LongTermMemory:
         return results[:n_results]
 
     async def _recall_sqlite(self, query: str, n_results: int) -> list[dict[str, Any]]:
-        """Fallback: LIKE-based text search across SQLite tables."""
-        results: list[dict[str, Any]] = []
+        """Fallback: LIKE-based text search across SQLite tables.
+
+        Queries each table with a per-table limit, then returns the most
+        recent results across all tables to avoid biasing toward whichever
+        table is queried first.
+        """
+        results: list[tuple[Any, dict[str, Any]]] = []  # (timestamp, entry)
         pattern = f"%{query}%"
+        per_table = max(n_results, 3)
 
         async with get_session() as session:
             # Search knowledge entries (key + value)
@@ -169,18 +175,21 @@ class LongTermMemory:
                     (KnowledgeEntry.key.ilike(pattern)) | (KnowledgeEntry.value.ilike(pattern)),
                 )
                 .order_by(KnowledgeEntry.updated_at.desc())
-                .limit(n_results)
+                .limit(per_table)
             )
             result = await session.execute(stmt)
             for entry in result.scalars().all():
                 results.append(
-                    {
-                        "document": f"{entry.key}: {entry.value}",
-                        "collection": KNOWLEDGE,
-                        "metadata": {"category": entry.category, "source": entry.source},
-                        "distance": 0.5,
-                        "id": f"know_{entry.id}",
-                    }
+                    (
+                        entry.updated_at,
+                        {
+                            "document": f"{entry.key}: {entry.value}",
+                            "collection": KNOWLEDGE,
+                            "metadata": {"category": entry.category, "source": entry.source},
+                            "distance": 0.5,
+                            "id": f"know_{entry.id}",
+                        },
+                    )
                 )
 
             # Search conversations
@@ -188,18 +197,21 @@ class LongTermMemory:
                 select(ConversationMessage)
                 .where(ConversationMessage.content.ilike(pattern))
                 .order_by(ConversationMessage.created_at.desc())
-                .limit(n_results)
+                .limit(per_table)
             )
             result = await session.execute(stmt)
             for msg in result.scalars().all():
                 results.append(
-                    {
-                        "document": msg.content,
-                        "collection": CONVERSATIONS,
-                        "metadata": {"user_id": msg.user_id, "role": msg.role},
-                        "distance": 0.5,
-                        "id": f"msg_{msg.id}",
-                    }
+                    (
+                        msg.created_at,
+                        {
+                            "document": msg.content,
+                            "collection": CONVERSATIONS,
+                            "metadata": {"user_id": msg.user_id, "role": msg.role},
+                            "distance": 0.5,
+                            "id": f"msg_{msg.id}",
+                        },
+                    )
                 )
 
             # Search research records
@@ -209,21 +221,26 @@ class LongTermMemory:
                     (ResearchRecord.query.ilike(pattern)) | (ResearchRecord.summary.ilike(pattern)),
                 )
                 .order_by(ResearchRecord.created_at.desc())
-                .limit(n_results)
+                .limit(per_table)
             )
             result = await session.execute(stmt)
             for rec in result.scalars().all():
                 results.append(
-                    {
-                        "document": f"{rec.query}\n{rec.summary}",
-                        "collection": RESEARCH,
-                        "metadata": {"user_id": rec.user_id or 0},
-                        "distance": 0.5,
-                        "id": f"research_{rec.id}",
-                    }
+                    (
+                        rec.created_at,
+                        {
+                            "document": f"{rec.query}\n{rec.summary}",
+                            "collection": RESEARCH,
+                            "metadata": {"user_id": rec.user_id or 0},
+                            "distance": 0.5,
+                            "id": f"research_{rec.id}",
+                        },
+                    )
                 )
 
-        return results[:n_results]
+        # Sort by recency across all tables, then take top N
+        results.sort(key=lambda x: x[0] or "", reverse=True)
+        return [entry for _, entry in results[:n_results]]
 
     async def recall_knowledge(
         self,

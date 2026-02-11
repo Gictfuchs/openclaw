@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING
 
 import structlog
 
+from openclaw.web import get_client_ip
+
 if TYPE_CHECKING:
     from fastapi import Request
 
@@ -62,18 +64,9 @@ def validate_csrf_token(request: Request, token: str) -> bool:
     return hmac.compare_digest(token.encode("utf-8"), expected.encode("utf-8"))
 
 
-def _get_client_ip(request: Request) -> str:
-    """Extract client IP from the request."""
-    forwarded = request.headers.get("x-forwarded-for", "")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    client = request.client
-    return client.host if client else "unknown"
-
-
 def is_login_locked(request: Request) -> bool:
     """Check if the client IP is currently locked out due to too many failed attempts."""
-    ip = _get_client_ip(request)
+    ip = get_client_ip(request)
     failures = _login_failures.get(ip)
     if not failures:
         return False
@@ -96,7 +89,7 @@ def is_login_locked(request: Request) -> bool:
 
 def _record_login_failure(request: Request) -> None:
     """Record a failed login attempt for the client IP."""
-    ip = _get_client_ip(request)
+    ip = get_client_ip(request)
     now = time.monotonic()
 
     # Append and prune old entries
@@ -127,7 +120,7 @@ def do_login(request: Request, secret: str) -> bool:
         # Rotate CSRF token on login to prevent fixation
         request.session[_CSRF_KEY] = secrets.token_urlsafe(32)
         # Clear failure history for this IP on successful login
-        ip = _get_client_ip(request)
+        ip = get_client_ip(request)
         _login_failures.pop(ip, None)
         return True
     _record_login_failure(request)

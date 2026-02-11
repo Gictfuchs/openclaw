@@ -25,6 +25,7 @@ from openclaw.core.events import (
     ToolCallEvent,
     ToolResultEvent,
 )
+from openclaw.web import get_client_ip
 
 logger = structlog.get_logger()
 
@@ -76,15 +77,6 @@ def _event_to_dict(event: Any) -> dict[str, Any]:
     return {**base, "type": "unknown"}
 
 
-def _get_ws_client_ip(websocket: WebSocket) -> str:
-    """Extract client IP from WebSocket connection."""
-    forwarded = websocket.headers.get("x-forwarded-for", "")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    client = websocket.client
-    return client.host if client else "unknown"
-
-
 @router.websocket("/ws/chat")
 async def chat_ws(websocket: WebSocket) -> None:
     """WebSocket endpoint for real-time chat with the Fochs agent.
@@ -106,7 +98,7 @@ async def chat_ws(websocket: WebSocket) -> None:
         return
 
     # --- Connection limit check (after accept, before tracking) ---
-    client_ip = _get_ws_client_ip(websocket)
+    client_ip = get_client_ip(websocket)
 
     if _ws_total_connections >= _WS_MAX_CONNECTIONS_GLOBAL:
         logger.warning("ws_global_limit_reached", total=_ws_total_connections)

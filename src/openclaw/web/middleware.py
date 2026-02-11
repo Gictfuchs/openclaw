@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse, Response
 
+from openclaw.web import get_client_ip
+
 if TYPE_CHECKING:
     from starlette.requests import Request
 
@@ -77,11 +79,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 return await call_next(request)  # type: ignore[misc]
 
         # Get client IP (respect X-Forwarded-For behind reverse proxies)
-        forwarded = request.headers.get("x-forwarded-for", "")
-        if forwarded:
-            client_ip = forwarded.split(",")[0].strip()
-        else:
-            client_ip = request.client.host if request.client else "unknown"
+        client_ip = get_client_ip(request)
         now = time.monotonic()
         window_start = now - 60.0
 
