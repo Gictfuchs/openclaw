@@ -16,6 +16,7 @@ from openclaw.web.auth import (
     do_logout,
     get_csrf_token,
     is_authenticated,
+    is_login_locked,
     validate_csrf_token,
 )
 
@@ -34,6 +35,16 @@ async def login_page(request: Request) -> HTMLResponse:
 @router.post("/login", response_model=None)
 async def login_submit(request: Request) -> RedirectResponse | HTMLResponse:
     form = await request.form()
+
+    # Brute-force lockout check
+    if is_login_locked(request):
+        csrf_new = get_csrf_token(request)
+        return templates.TemplateResponse(
+            request,
+            "login.html",
+            {"error": "Zu viele Anmeldeversuche. Bitte spaeter erneut versuchen.", "csrf_token": csrf_new},
+            status_code=429,
+        )
 
     # CSRF validation
     csrf_token = str(form.get("csrf_token", ""))
@@ -79,7 +90,8 @@ async def dashboard(request: Request) -> HTMLResponse | RedirectResponse:
 async def chat_page(request: Request) -> HTMLResponse | RedirectResponse:
     if not is_authenticated(request):
         return RedirectResponse(url="/login", status_code=303)
-    return templates.TemplateResponse(request, "chat.html")
+    csrf_token = get_csrf_token(request)
+    return templates.TemplateResponse(request, "chat.html", {"csrf_token": csrf_token})
 
 
 @router.get("/settings", response_class=HTMLResponse, response_model=None)
@@ -87,4 +99,5 @@ async def settings_page(request: Request) -> HTMLResponse | RedirectResponse:
     if not is_authenticated(request):
         return RedirectResponse(url="/login", status_code=303)
     settings = request.app.state.settings
-    return templates.TemplateResponse(request, "settings.html", {"settings": settings})
+    csrf_token = get_csrf_token(request)
+    return templates.TemplateResponse(request, "settings.html", {"settings": settings, "csrf_token": csrf_token})

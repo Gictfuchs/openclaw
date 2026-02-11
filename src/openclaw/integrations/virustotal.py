@@ -104,13 +104,16 @@ class VirusTotalClient:
             )
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 404:
-                logger.info("vt_file_not_found", hash=file_hash)
+                # Fail-closed: unknown file != safe file.
+                # A brand-new malware hash absent from VT must NOT be
+                # treated as safe — callers should decide how to handle.
+                logger.warning("vt_file_not_found", hash=file_hash)
                 return ScanResult(
                     resource_id=file_hash,
                     positives=0,
                     total=0,
-                    is_safe=True,
-                    verbose_msg="File not found in VirusTotal database",
+                    is_safe=False,
+                    verbose_msg="File not found in VirusTotal database — treat as unknown",
                 )
             logger.error("vt_scan_hash_error", status=e.response.status_code)
             raise

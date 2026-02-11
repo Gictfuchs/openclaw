@@ -4,12 +4,14 @@ Security:
 - Session-based authentication before accepting connections
 - Token-bucket rate limiting per connection (20 msg/min)
 - Message size limit to prevent memory exhaustion (16 KB)
+- Global connection limit per session to prevent rate-limit bypass via parallel connections
 """
 
 from __future__ import annotations
 
 import json
 import time
+from collections import defaultdict
 from typing import Any
 
 import structlog
@@ -37,6 +39,14 @@ _WS_RATE_WINDOW = 60.0  # seconds
 
 # Maximum message size (16 KB) — prevents large payload attacks
 _WS_MAX_MESSAGE_SIZE = 16 * 1024
+
+# Global WebSocket connection limits
+_WS_MAX_CONNECTIONS_GLOBAL = 20
+_WS_MAX_CONNECTIONS_PER_IP = 3
+
+# Active connection tracking: IP -> count
+_ws_connections: dict[str, int] = defaultdict(int)
+_ws_total_connections = 0
 
 
 def _event_to_dict(event: Any) -> dict[str, Any]:
@@ -66,6 +76,15 @@ def _event_to_dict(event: Any) -> dict[str, Any]:
     return {**base, "type": "unknown"}
 
 
+def _get_ws_client_ip(websocket: WebSocket) -> str:
+    """Extract client IP from WebSocket connection."""
+    forwarded = websocket.headers.get("x-forwarded-for", "")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    client = websocket.client
+    return client.host if client else "unknown"
+
+
 @router.websocket("/ws/chat")
 async def chat_ws(websocket: WebSocket) -> None:
     """WebSocket endpoint for real-time chat with the Fochs agent.
@@ -75,25 +94,44 @@ async def chat_ws(websocket: WebSocket) -> None:
     - Server streams: {"type": "thinking|tool_call|tool_result|response|error", ...}
     - Server sends {"type": "done"} when processing is complete
     """
+    global _ws_total_connections  # noqa: PLW0603
+
     # Check auth via session cookie
     session = websocket.session
     if not session.get("authenticated", False):
         await websocket.close(code=4001, reason="Not authenticated")
         return
 
-    await websocket.accept()
-    logger.info("web_chat_connected")
+    # --- Connection limit check (before accept) ---
+    client_ip = _get_ws_client_ip(websocket)
 
-    agent = websocket.app.state.fochs.get("agent")
-    if not agent:
-        await websocket.send_json({"type": "error", "message": "Agent nicht verfuegbar"})
-        await websocket.close(code=4002, reason="Agent unavailable")
+    if _ws_total_connections >= _WS_MAX_CONNECTIONS_GLOBAL:
+        logger.warning("ws_global_limit_reached", total=_ws_total_connections)
+        await websocket.close(code=4003, reason="Too many connections")
         return
 
-    # Per-connection rate limiter (sliding window)
-    message_timestamps: list[float] = []
+    if _ws_connections[client_ip] >= _WS_MAX_CONNECTIONS_PER_IP:
+        logger.warning("ws_per_ip_limit_reached", ip=client_ip, count=_ws_connections[client_ip])
+        await websocket.close(code=4003, reason="Too many connections from this IP")
+        return
+
+    # Track connection
+    _ws_connections[client_ip] += 1
+    _ws_total_connections += 1
+
+    await websocket.accept()
+    logger.info("web_chat_connected", ip=client_ip, total=_ws_total_connections)
 
     try:
+        agent = websocket.app.state.fochs.get("agent")
+        if not agent:
+            await websocket.send_json({"type": "error", "message": "Agent nicht verfuegbar"})
+            await websocket.close(code=4002, reason="Agent unavailable")
+            return
+
+        # Per-connection rate limiter (sliding window)
+        message_timestamps: list[float] = []
+
         while True:
             # Receive user message
             raw = await websocket.receive_text()
@@ -160,3 +198,10 @@ async def chat_ws(websocket: WebSocket) -> None:
         logger.info("web_chat_disconnected")
     except Exception as e:
         logger.error("web_chat_unexpected_error", error=str(e))
+    finally:
+        # Always release connection tracking
+        _ws_connections[client_ip] = max(0, _ws_connections[client_ip] - 1)
+        if _ws_connections[client_ip] == 0:
+            _ws_connections.pop(client_ip, None)
+        _ws_total_connections = max(0, _ws_total_connections - 1)
+        logger.info("ws_connection_released", ip=client_ip, total=_ws_total_connections)

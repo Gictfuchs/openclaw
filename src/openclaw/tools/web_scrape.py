@@ -2,11 +2,11 @@
 
 import re
 from typing import Any
-from urllib.parse import urlparse
 
 import httpx
 import structlog
 
+from openclaw.integrations import check_response_size, validate_url
 from openclaw.tools.base import BaseTool
 
 logger = structlog.get_logger()
@@ -14,16 +14,8 @@ logger = structlog.get_logger()
 # Max content length to return (chars)
 _MAX_CONTENT_LENGTH = 30_000
 
-# Blocked domains that should never be scraped
-_BLOCKED_DOMAINS = frozenset(
-    {
-        "localhost",
-        "127.0.0.1",
-        "0.0.0.0",
-        "169.254.169.254",  # AWS metadata
-        "metadata.google.internal",  # GCP metadata
-    }
-)
+# Max raw HTTP response size (2 MB)
+_MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 
 # Request headers to look like a regular browser
 _HEADERS = {
@@ -64,18 +56,21 @@ class WebScrapeTool(BaseTool):
     async def execute(self, **kwargs: Any) -> str:
         url = kwargs["url"]
 
-        # Validate URL
-        error = self._validate_url(url)
+        # Validate URL using the shared SSRF-prevention utility
+        error = validate_url(url)
         if error:
             return f"Error: {error}"
 
         try:
             resp = await self._client.get(url)
             resp.raise_for_status()
+            check_response_size(resp.content, _MAX_RESPONSE_BYTES, context="web_scrape")
         except httpx.HTTPStatusError as e:
             return f"HTTP error {e.response.status_code} fetching {url}"
         except httpx.TimeoutException:
             return f"Timeout fetching {url}"
+        except ValueError as e:
+            return f"Error: {e}"
         except Exception as e:
             return f"Error fetching {url}: {e}"
 
@@ -93,27 +88,6 @@ class WebScrapeTool(BaseTool):
             text = text[:_MAX_CONTENT_LENGTH] + f"\n\n[Content truncated at {_MAX_CONTENT_LENGTH} chars]"
 
         return f"Content from {url}:\n\n{text}"
-
-    @staticmethod
-    def _validate_url(url: str) -> str | None:
-        """Validate URL for safety. Returns error message or None."""
-        try:
-            parsed = urlparse(url)
-        except Exception:
-            return "Invalid URL"
-
-        if parsed.scheme not in ("http", "https"):
-            return f"Unsupported scheme: {parsed.scheme}. Only http/https allowed."
-
-        hostname = parsed.hostname or ""
-        if hostname in _BLOCKED_DOMAINS:
-            return f"Blocked domain: {hostname}"
-
-        # Block private IP ranges
-        if hostname.startswith("10.") or hostname.startswith("192.168.") or hostname.startswith("172."):
-            return "Private IP addresses are not allowed."
-
-        return None
 
     @staticmethod
     def _html_to_text(html: str) -> str:

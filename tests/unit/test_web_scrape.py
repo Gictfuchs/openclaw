@@ -61,12 +61,12 @@ class TestWebScrapeTool:
     async def test_validate_url_blocks_private_ips(self, scraper: WebScrapeTool) -> None:
         result = await scraper.execute(url="http://192.168.1.1/admin")
         assert "Error" in result
-        assert "Private IP" in result
+        assert "Private" in result or "not allowed" in result
 
     async def test_validate_url_blocks_metadata(self, scraper: WebScrapeTool) -> None:
         result = await scraper.execute(url="http://169.254.169.254/latest/meta-data")
         assert "Error" in result
-        assert "Blocked domain" in result
+        assert "Blocked" in result or "not allowed" in result
 
     async def test_validate_url_blocks_localhost(self, scraper: WebScrapeTool) -> None:
         result = await scraper.execute(url="http://localhost:8080/secret")
@@ -75,7 +75,7 @@ class TestWebScrapeTool:
     async def test_validate_url_rejects_non_http(self, scraper: WebScrapeTool) -> None:
         result = await scraper.execute(url="file:///etc/passwd")
         assert "Error" in result
-        assert "Unsupported scheme" in result
+        assert "scheme" in result.lower()
 
     async def test_scrape_handles_http_error(self, scraper: WebScrapeTool) -> None:
         mock_response = httpx.Response(
