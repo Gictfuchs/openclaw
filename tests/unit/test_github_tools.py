@@ -28,7 +28,7 @@ class TestGitHubRepoTool:
         )
 
         tool = GitHubRepoTool(client=mock_gh_client)
-        with patch("asyncio.get_event_loop") as mock_loop:
+        with patch("asyncio.get_running_loop") as mock_loop:
             mock_loop.return_value.run_in_executor = AsyncMock(
                 return_value=mock_gh_client.get_repo_info.return_value,
             )
@@ -41,7 +41,7 @@ class TestGitHubRepoTool:
 
     async def test_handles_error(self, mock_gh_client: MagicMock) -> None:
         tool = GitHubRepoTool(client=mock_gh_client)
-        with patch("asyncio.get_event_loop") as mock_loop:
+        with patch("asyncio.get_running_loop") as mock_loop:
             mock_loop.return_value.run_in_executor = AsyncMock(
                 side_effect=Exception("Not found"),
             )
@@ -80,7 +80,7 @@ class TestGitHubIssuesTool:
         ]
 
         tool = GitHubIssuesTool(client=mock_gh_client)
-        with patch("asyncio.get_event_loop") as mock_loop:
+        with patch("asyncio.get_running_loop") as mock_loop:
             mock_loop.return_value.run_in_executor = AsyncMock(
                 return_value=mock_gh_client.list_issues.return_value,
             )
@@ -94,7 +94,7 @@ class TestGitHubIssuesTool:
 
     async def test_no_issues(self, mock_gh_client: MagicMock) -> None:
         tool = GitHubIssuesTool(client=mock_gh_client)
-        with patch("asyncio.get_event_loop") as mock_loop:
+        with patch("asyncio.get_running_loop") as mock_loop:
             mock_loop.return_value.run_in_executor = AsyncMock(return_value=[])
             result = await tool.execute(repo="owner/repo")
 
@@ -112,7 +112,7 @@ class TestGitHubCreateIssueTool:
         )
 
         tool = GitHubCreateIssueTool(client=mock_gh_client)
-        with patch("asyncio.get_event_loop") as mock_loop:
+        with patch("asyncio.get_running_loop") as mock_loop:
             mock_loop.return_value.run_in_executor = AsyncMock(
                 return_value=mock_gh_client.create_issue.return_value,
             )

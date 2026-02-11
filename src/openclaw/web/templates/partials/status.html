@@ -31,9 +31,9 @@
         <h3>Token Budget</h3>
         <dl>
             <dt>Heute</dt>
-            <dd>{{ status.budget.get("daily_used", 0) | int }} / {{ status.budget.get("daily_limit", 0) | int }}</dd>
+            <dd>{{ status.budget.get("daily_usage", 0) | int }} / {{ status.budget.get("daily_limit", 0) | int }}</dd>
             <dt>Monat</dt>
-            <dd>{{ status.budget.get("monthly_used", 0) | int }} / {{ status.budget.get("monthly_limit", 0) | int }}</dd>
+            <dd>{{ status.budget.get("monthly_usage", 0) | int }} / {{ status.budget.get("monthly_limit", 0) | int }}</dd>
         </dl>
     </div>
     {% endif %}
@@ -59,7 +59,7 @@
         <h3>Scheduler</h3>
         <dl>
             <dt>Aktive Watcher</dt>
-            <dd>{{ status.scheduler.get("active_watchers", 0) }}</dd>
+            <dd>{{ status.scheduler.get("active", 0) }}</dd>
         </dl>
     </div>
     {% endif %}

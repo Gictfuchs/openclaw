@@ -446,8 +446,11 @@ class FochsApp:
                 await self.telegram.app.updater.stop()  # type: ignore[union-attr]
                 await self.telegram.app.stop()
                 await self.telegram.app.shutdown()
-            # Close integration HTTP clients
-            for client in (self._brave, self._scraper, self._github, self._rss):
+            # Close integration and LLM HTTP clients
+            closeable = [self._brave, self._scraper, self._github, self._rss]
+            if self.llm_router:
+                closeable.extend([self.llm_router.ollama, self.llm_router.grok])
+            for client in closeable:
                 if client and hasattr(client, "close"):
                     try:
                         result = client.close()

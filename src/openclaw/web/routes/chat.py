@@ -96,13 +96,16 @@ async def chat_ws(websocket: WebSocket) -> None:
     """
     global _ws_total_connections  # noqa: PLW0603
 
+    # Must accept before close — Starlette raises RuntimeError otherwise
+    await websocket.accept()
+
     # Check auth via session cookie
     session = websocket.session
     if not session.get("authenticated", False):
         await websocket.close(code=4001, reason="Not authenticated")
         return
 
-    # --- Connection limit check (before accept) ---
+    # --- Connection limit check (after accept, before tracking) ---
     client_ip = _get_ws_client_ip(websocket)
 
     if _ws_total_connections >= _WS_MAX_CONNECTIONS_GLOBAL:
@@ -115,11 +118,9 @@ async def chat_ws(websocket: WebSocket) -> None:
         await websocket.close(code=4003, reason="Too many connections from this IP")
         return
 
-    # Track connection
+    # Track connection only after all checks pass — ensures finally block matches
     _ws_connections[client_ip] += 1
     _ws_total_connections += 1
-
-    await websocket.accept()
     logger.info("web_chat_connected", ip=client_ip, total=_ws_total_connections)
 
     try:

@@ -41,7 +41,7 @@ class GitHubRepoTool(BaseTool):
         repo_name = kwargs["repo"]
 
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             info = await loop.run_in_executor(None, self._client.get_repo_info, repo_name)
         except Exception as e:
             return f"Error fetching repo '{repo_name}': {e}"
@@ -92,7 +92,7 @@ class GitHubIssuesTool(BaseTool):
         limit = min(kwargs.get("limit", 10), 25)
 
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             issues = await loop.run_in_executor(
                 None,
                 lambda: self._client.list_issues(repo_name, state=state, limit=limit),
@@ -145,7 +145,7 @@ class GitHubCreateIssueTool(BaseTool):
         body = kwargs.get("body", "")
 
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             issue = await loop.run_in_executor(
                 None,
                 lambda: self._client.create_issue(repo_name, title=title, body=body),

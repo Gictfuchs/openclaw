@@ -69,8 +69,8 @@ class LLMRouter:
         preferred_provider: str | None = None,
     ) -> LLMResponse:
         """Route a request to the best available LLM."""
-        # Budget check (async-safe to prevent TOCTOU race)
-        if self.budget and not await self.budget.check_budget(max_tokens):
+        # Atomic check-and-reserve to prevent TOCTOU race under concurrent load
+        if self.budget and not await self.budget.check_and_reserve(max_tokens):
             raise RuntimeError("Token budget exhausted")
 
         provider = self._select_provider(complexity, tools, preferred_provider)
@@ -90,10 +90,10 @@ class LLMRouter:
                 timeout=self.LLM_CALL_TIMEOUT,
             )
 
-            # Record token usage
+            # Adjust reservation to actual usage
             tokens_used = response.usage.total_tokens if response.usage else 0
-            if self.budget and tokens_used:
-                await self.budget.record_usage(tokens_used, provider=provider.provider_name)
+            if self.budget:
+                await self.budget.adjust_reservation(max_tokens, tokens_used)
 
             logger.info(
                 "llm_response",
