@@ -311,8 +311,12 @@ class FochsTelegramBot:
 
         level = args[0].lower()
         if self.settings:
-            self.settings.autonomy_level = level
-        await update.message.reply_text(f"Autonomie-Level auf *{level}* gesetzt.", parse_mode="Markdown")
+            self.settings.autonomy_level = level  # type: ignore[assignment]
+            logger.info("autonomy_level_changed", user_id=update.effective_user.id, level=level)
+        await update.message.reply_text(
+            f"Autonomie-Level auf *{level}* gesetzt.\n_(Gilt bis zum naechsten Neustart)_",
+            parse_mode="Markdown",
+        )
 
     async def on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle free-form text messages."""

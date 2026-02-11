@@ -116,6 +116,7 @@ class LLMRouter:
                 max_tokens=max_tokens,
                 temperature=temperature,
                 failed_provider=provider.provider_name,
+                reserved_tokens=max_tokens,
             )
         except Exception as e:
             logger.warning("llm_provider_failed", provider=provider.provider_name, error=str(e))
@@ -126,6 +127,7 @@ class LLMRouter:
                 max_tokens=max_tokens,
                 temperature=temperature,
                 failed_provider=provider.provider_name,
+                reserved_tokens=max_tokens,
             )
 
     def _select_provider(
@@ -165,6 +167,7 @@ class LLMRouter:
         max_tokens: int,
         temperature: float,
         failed_provider: str,
+        reserved_tokens: int = 0,
     ) -> LLMResponse:
         """Try fallback providers in order: Claude -> Gemini -> Ollama."""
         fallback_order = [self.claude, self.gemini, self.ollama]
@@ -184,15 +187,19 @@ class LLMRouter:
                     ),
                     timeout=self.LLM_CALL_TIMEOUT,
                 )
-                # Record fallback usage too
+                # Adjust the original reservation to match actual fallback usage
+                # (check_and_reserve pre-incremented by reserved_tokens)
                 tokens_used = response.usage.total_tokens if response.usage else 0
-                if self.budget and tokens_used:
-                    await self.budget.record_usage(tokens_used, provider=provider.provider_name)
+                if self.budget and reserved_tokens:
+                    await self.budget.adjust_reservation(reserved_tokens, tokens_used)
                 return response
             except Exception as e:
                 logger.warning("llm_fallback_failed", provider=provider.provider_name, error=str(e))
                 continue
 
+        # All fallbacks failed — release the reservation entirely
+        if self.budget and reserved_tokens:
+            await self.budget.adjust_reservation(reserved_tokens, 0)
         raise RuntimeError("All LLM providers failed")
 
     async def check_availability(self) -> dict[str, bool]:
