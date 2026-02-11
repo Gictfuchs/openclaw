@@ -17,11 +17,31 @@ class ToolRegistry:
 
     def __init__(self) -> None:
         self._tools: dict[str, BaseTool] = {}
+        self._core_tools: set[str] = set()
 
-    def register(self, tool: BaseTool) -> None:
-        """Register a tool."""
+    def register(self, tool: BaseTool, *, core: bool = False) -> None:
+        """Register a tool.
+
+        Args:
+            tool: The tool instance to register.
+            core: If True, mark this tool as a core tool that cannot be
+                  overwritten by plugins.
+        """
+        if tool.name in self._core_tools:
+            logger.warning(
+                "tool_register_blocked",
+                name=tool.name,
+                reason="Core tool cannot be overwritten by plugins",
+            )
+            return
         self._tools[tool.name] = tool
-        logger.debug("tool_registered", name=tool.name)
+        if core:
+            self._core_tools.add(tool.name)
+        logger.debug("tool_registered", name=tool.name, core=core)
+
+    def is_core_tool(self, name: str) -> bool:
+        """Check if a tool name is a protected core tool."""
+        return name in self._core_tools
 
     def get(self, name: str) -> BaseTool | None:
         """Get a tool by name."""

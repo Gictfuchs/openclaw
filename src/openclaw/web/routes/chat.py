@@ -99,9 +99,15 @@ async def chat_ws(websocket: WebSocket) -> None:
                         break
                     await websocket.send_json(_event_to_dict(event))
             except Exception as e:
-                logger.error("web_chat_agent_error", error=str(e))
+                logger.error("web_chat_agent_error", error=str(e), exc_info=True)
                 if websocket.client_state == WebSocketState.CONNECTED:
-                    await websocket.send_json({"type": "error", "message": f"Agent-Fehler: {e}"})
+                    # Never leak internal exception details to the client
+                    await websocket.send_json(
+                        {
+                            "type": "error",
+                            "message": "Ein interner Fehler ist aufgetreten. Bitte versuche es erneut.",
+                        }
+                    )
 
             # Signal completion
             if websocket.client_state == WebSocketState.CONNECTED:

@@ -265,3 +265,17 @@ h1 { font-size: 1.5rem; margin-bottom: 1.5rem; }
 .connection-status.connected { color: var(--ok); }
 .connection-status.disconnected { color: var(--err); }
 .connection-status.connecting { color: var(--warn); }
+
+/* Logout button styled as nav link */
+.nav-logout-btn {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    font-size: 0.9rem;
+    cursor: pointer;
+    padding: 0;
+    font-family: inherit;
+    transition: color 0.15s;
+}
+
+.nav-logout-btn:hover { color: var(--text); }

@@ -119,24 +119,24 @@ class FochsApp:
         brave_key = self.settings.brave_api_key.get_secret_value()
         if brave_key:
             self._brave = BraveSearchClient(api_key=brave_key)
-            registry.register(WebSearchTool(client=self._brave))
+            registry.register(WebSearchTool(client=self._brave), core=True)
             logger.info("tool_configured", tool="web_search")
 
         if self._gemini:
-            registry.register(GoogleSearchTool(gemini=self._gemini))
+            registry.register(GoogleSearchTool(gemini=self._gemini), core=True)
             logger.info("tool_configured", tool="google_search")
 
         self._scraper = WebScrapeTool()
-        registry.register(self._scraper)
+        registry.register(self._scraper, core=True)
         logger.info("tool_configured", tool="web_scrape")
 
         # Phase 3: GitHub, Email, RSS tools
         gh_token = self.settings.github_token.get_secret_value()
         if gh_token:
             self._github = GitHubClient(token=gh_token)
-            registry.register(GitHubRepoTool(client=self._github))
-            registry.register(GitHubIssuesTool(client=self._github))
-            registry.register(GitHubCreateIssueTool(client=self._github))
+            registry.register(GitHubRepoTool(client=self._github), core=True)
+            registry.register(GitHubIssuesTool(client=self._github), core=True)
+            registry.register(GitHubCreateIssueTool(client=self._github), core=True)
             logger.info("tool_configured", tool="github")
 
         if self.settings.email_address and self.settings.email_imap_host:
@@ -148,19 +148,19 @@ class FochsApp:
                     smtp_host=self.settings.email_smtp_host,
                 )
             )
-            registry.register(ReadEmailsTool(client=self._email))
+            registry.register(ReadEmailsTool(client=self._email), core=True)
             if self.settings.email_smtp_host:
-                registry.register(SendEmailTool(client=self._email))
+                registry.register(SendEmailTool(client=self._email), core=True)
             logger.info("tool_configured", tool="email")
 
         self._rss = RSSClient()
-        registry.register(CheckFeedTool(client=self._rss))
+        registry.register(CheckFeedTool(client=self._rss), core=True)
         logger.info("tool_configured", tool="rss")
 
         # Phase 5: Scheduler tools
-        registry.register(WatchTool())
-        registry.register(UnwatchTool())
-        registry.register(ListWatchesTool())
+        registry.register(WatchTool(), core=True)
+        registry.register(UnwatchTool(), core=True)
+        registry.register(ListWatchesTool(), core=True)
         logger.info("tool_configured", tool="scheduler")
 
         # Phase 8: Shell, File, Self-Update tools
@@ -172,11 +172,12 @@ class FochsApp:
             ShellExecuteTool(
                 guard=self._shell_guard,
                 default_timeout=self.settings.shell_timeout,
-            )
+            ),
+            core=True,
         )
-        registry.register(FileReadTool(guard=self._shell_guard))
-        registry.register(FileWriteTool(guard=self._shell_guard))
-        registry.register(SelfUpdateTool(guard=self._shell_guard))
+        registry.register(FileReadTool(guard=self._shell_guard), core=True)
+        registry.register(FileWriteTool(guard=self._shell_guard), core=True)
+        registry.register(SelfUpdateTool(guard=self._shell_guard), core=True)
         logger.info(
             "tool_configured",
             tool="shell_suite",
@@ -222,13 +223,13 @@ class FochsApp:
         logger.info("memory_initialized", db=self.settings.db_path, vectors=self.settings.chroma_path)
 
         # Register memory tools (needs memory to be initialized first)
-        self.tools.register(RecallMemoryTool(memory=self.memory))
-        self.tools.register(StoreMemoryTool(memory=self.memory))
+        self.tools.register(RecallMemoryTool(memory=self.memory), core=True)
+        self.tools.register(StoreMemoryTool(memory=self.memory), core=True)
         logger.info("tool_configured", tool="memory")
 
         # Phase 6: Sub-agent runner + delegation tool
         self.sub_agent_runner = SubAgentRunner(llm=self.llm_router, tools=self.tools)
-        self.tools.register(DelegateTool(runner=self.sub_agent_runner))
+        self.tools.register(DelegateTool(runner=self.sub_agent_runner), core=True)
         logger.info("tool_configured", tool="delegate")
 
         # Phase 8: Plugin loader (hot-reload custom tools)

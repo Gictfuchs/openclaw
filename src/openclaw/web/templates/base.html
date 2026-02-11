@@ -16,7 +16,9 @@
             <a href="/">Dashboard</a>
             <a href="/chat">Chat</a>
             <a href="/settings">Settings</a>
-            <a href="/logout">Logout</a>
+            <form action="/logout" method="post" style="display:inline; margin:0; padding:0;">
+                <button type="submit" class="nav-logout-btn">Logout</button>
+            </form>
         </div>
         {% endif %}
     </nav>

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hmac
+
 from fastapi import HTTPException, Request
 
 _SESSION_KEY = "authenticated"
@@ -15,10 +17,13 @@ def is_authenticated(request: Request) -> bool:
 def do_login(request: Request, secret: str) -> bool:
     """Attempt login with the provided secret key.
 
+    Uses hmac.compare_digest for timing-safe comparison to prevent
+    timing side-channel attacks that could leak the secret.
+
     Returns True on success.
     """
     expected = request.app.state.settings.web_secret_key.get_secret_value()
-    if secret == expected:
+    if hmac.compare_digest(secret.encode("utf-8"), expected.encode("utf-8")):
         request.session[_SESSION_KEY] = True
         return True
     return False

@@ -30,7 +30,7 @@ async def login_submit(request: Request) -> RedirectResponse | HTMLResponse:
     return templates.TemplateResponse(request, "login.html", {"error": "Falscher Schluessel"})
 
 
-@router.get("/logout")
+@router.post("/logout")
 async def logout_route(request: Request) -> RedirectResponse:
     do_logout(request)
     return RedirectResponse(url="/login", status_code=303)

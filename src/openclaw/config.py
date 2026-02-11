@@ -53,6 +53,7 @@ class Settings(BaseSettings):
     web_host: str = "127.0.0.1"
     web_port: int = 8080
     web_secret_key: SecretStr = Field(default_factory=lambda: SecretStr(secrets.token_hex(32)))
+    debug: bool = False
 
     # --- Agent ---
     autonomy_level: str = "full"  # full, ask, manual

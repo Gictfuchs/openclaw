@@ -1,4 +1,4 @@
-"""Rate-limiting middleware for the web dashboard."""
+"""Middleware for the web dashboard: rate-limiting and security headers."""
 
 from __future__ import annotations
 
@@ -11,6 +11,36 @@ from starlette.responses import JSONResponse, Response
 
 if TYPE_CHECKING:
     from starlette.requests import Request
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Add security headers to all responses.
+
+    Protects against clickjacking, XSS, MIME sniffing, and other attacks.
+    """
+
+    async def dispatch(self, request: Request, call_next: object) -> Response:  # type: ignore[override]
+        response: Response = await call_next(request)  # type: ignore[misc]
+        # Prevent clickjacking
+        response.headers["X-Frame-Options"] = "DENY"
+        # Prevent MIME type sniffing
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        # Enable XSS filter (legacy, but harmless)
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        # Referrer policy
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        # Content Security Policy — allow self + inline for HTMX/templates
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data:; "
+            "connect-src 'self' ws: wss:; "
+            "frame-ancestors 'none'"
+        )
+        # Permissions policy — restrict sensitive browser features
+        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(), payment=()"
+        return response
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
