@@ -51,8 +51,8 @@ class AgentLoop:
         for iteration in range(self.max_iterations):
             logger.debug("agent_loop_iteration", iteration=iteration)
 
-            # Check budget before each LLM call
-            if self.llm.budget and not self.llm.budget.check_budget(4096):
+            # Check budget before each LLM call (async-safe to prevent TOCTOU)
+            if self.llm.budget and not await self.llm.budget.check_budget(4096):
                 yield ErrorEvent(message="Token-Budget erschoepft. Bitte spaeter erneut versuchen.")
                 return
 

@@ -17,6 +17,7 @@
             <a href="/chat">Chat</a>
             <a href="/settings">Settings</a>
             <form action="/logout" method="post" style="display:inline; margin:0; padding:0;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <button type="submit" class="nav-logout-btn">Logout</button>
             </form>
         </div>

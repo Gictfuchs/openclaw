@@ -69,8 +69,8 @@ class LLMRouter:
         preferred_provider: str | None = None,
     ) -> LLMResponse:
         """Route a request to the best available LLM."""
-        # Budget check
-        if self.budget and not self.budget.check_budget(max_tokens):
+        # Budget check (async-safe to prevent TOCTOU race)
+        if self.budget and not await self.budget.check_budget(max_tokens):
             raise RuntimeError("Token budget exhausted")
 
         provider = self._select_provider(complexity, tools, preferred_provider)

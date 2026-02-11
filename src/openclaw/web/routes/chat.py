@@ -1,8 +1,15 @@
-"""WebSocket chat route for real-time interaction with Fochs."""
+"""WebSocket chat route for real-time interaction with Fochs.
+
+Security:
+- Session-based authentication before accepting connections
+- Token-bucket rate limiting per connection (20 msg/min)
+- Message size limit to prevent memory exhaustion (16 KB)
+"""
 
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 import structlog
@@ -23,6 +30,13 @@ router = APIRouter()
 
 # Synthetic user ID for web dashboard sessions
 WEB_USER_ID = 1_000_000
+
+# WebSocket rate limiting: max messages per window
+_WS_RATE_LIMIT = 20  # messages
+_WS_RATE_WINDOW = 60.0  # seconds
+
+# Maximum message size (16 KB) — prevents large payload attacks
+_WS_MAX_MESSAGE_SIZE = 16 * 1024
 
 
 def _event_to_dict(event: Any) -> dict[str, Any]:
@@ -76,10 +90,39 @@ async def chat_ws(websocket: WebSocket) -> None:
         await websocket.close(code=4002, reason="Agent unavailable")
         return
 
+    # Per-connection rate limiter (sliding window)
+    message_timestamps: list[float] = []
+
     try:
         while True:
             # Receive user message
             raw = await websocket.receive_text()
+
+            # --- Message size check ---
+            if len(raw) > _WS_MAX_MESSAGE_SIZE:
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "message": f"Nachricht zu gross (max {_WS_MAX_MESSAGE_SIZE // 1024} KB).",
+                    }
+                )
+                continue
+
+            # --- Rate limiting ---
+            now = time.monotonic()
+            cutoff = now - _WS_RATE_WINDOW
+            message_timestamps[:] = [t for t in message_timestamps if t > cutoff]
+            if len(message_timestamps) >= _WS_RATE_LIMIT:
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "message": f"Rate limit: max {_WS_RATE_LIMIT} Nachrichten pro Minute.",
+                    }
+                )
+                logger.warning("ws_rate_limited")
+                continue
+            message_timestamps.append(now)
+
             try:
                 data = json.loads(raw)
                 message = data.get("message", "").strip()

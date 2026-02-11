@@ -1,4 +1,10 @@
-"""Token budget tracker - prevents runaway API costs."""
+"""Token budget tracker - prevents runaway API costs.
+
+Security:
+- All budget checks and updates are protected by asyncio.Lock to prevent
+  TOCTOU race conditions between check_budget() and record_usage().
+- Atomic check-and-reserve via ``check_and_reserve()`` for zero-gap guarantees.
+"""
 
 from __future__ import annotations
 
@@ -23,7 +29,7 @@ class TokenBudget:
     - Sub-agents spawning unbounded work
 
     Optionally persists state to a JSON file so usage survives restarts.
-    Thread-safe via asyncio.Lock for concurrent coroutine access.
+    All check and record operations are serialized via asyncio.Lock.
     """
 
     def __init__(
@@ -118,8 +124,8 @@ class TokenBudget:
                 logger.warning("budget_kill_switch_auto_reset", msg="Kill switch reset on month boundary")
             self._killed = False
 
-    def check_budget(self, estimated_tokens: int = 0) -> bool:
-        """Check if we can afford the estimated token cost. Returns True if OK."""
+    def _check_budget_unlocked(self, estimated_tokens: int = 0) -> bool:
+        """Internal budget check (caller must hold the lock)."""
         if self._killed:
             return False
         self._rotate_if_needed()
@@ -131,12 +137,41 @@ class TokenBudget:
             return False
         return True
 
+    async def check_budget(self, estimated_tokens: int = 0) -> bool:
+        """Check if we can afford the estimated token cost (async-safe).
+
+        Returns True if the budget allows the estimated tokens.
+        """
+        async with self._lock:
+            return self._check_budget_unlocked(estimated_tokens)
+
+    async def check_and_reserve(self, estimated_tokens: int) -> bool:
+        """Atomically check budget and reserve tokens if within limits.
+
+        This prevents TOCTOU races: if the check passes, the tokens are
+        immediately reserved so no concurrent coroutine can double-spend.
+
+        Returns True if reserved, False if budget exceeded.
+        """
+        async with self._lock:
+            if not self._check_budget_unlocked(estimated_tokens):
+                return False
+            # Reserve by pre-incrementing usage
+            self._daily_usage += estimated_tokens
+            self._monthly_usage += estimated_tokens
+            self._save_state()
+            return True
+
     def check_run_budget(self, run_tokens: int) -> bool:
         """Check if a single run has exceeded its token limit."""
         return run_tokens <= self.per_run_limit
 
     async def record_usage(self, tokens: int, provider: str = "") -> None:
-        """Record token usage after an API call (async-safe)."""
+        """Record token usage after an API call (async-safe).
+
+        If ``check_and_reserve()`` was used, call ``adjust_reservation()``
+        instead to reconcile the actual usage vs the estimate.
+        """
         async with self._lock:
             self._rotate_if_needed()
             self._daily_usage += tokens
@@ -148,6 +183,29 @@ class TokenBudget:
                 logger.error("budget_kill_switch", reason="monthly_limit", usage=self._monthly_usage)
                 self._killed = True
             # Persist after every usage update
+            self._save_state()
+
+    async def adjust_reservation(self, estimated: int, actual: int) -> None:
+        """Adjust a previous reservation to match actual usage.
+
+        Called after ``check_and_reserve()`` when the actual token count
+        differs from the estimate. Corrects the counters.
+        """
+        diff = actual - estimated
+        if diff == 0:
+            return
+        async with self._lock:
+            self._daily_usage += diff
+            self._monthly_usage += diff
+            # Prevent negative usage from over-estimation
+            self._daily_usage = max(0, self._daily_usage)
+            self._monthly_usage = max(0, self._monthly_usage)
+            if self._daily_usage > self.daily_limit:
+                logger.error("budget_kill_switch", reason="daily_limit", usage=self._daily_usage)
+                self._killed = True
+            if self._monthly_usage > self.monthly_limit:
+                logger.error("budget_kill_switch", reason="monthly_limit", usage=self._monthly_usage)
+                self._killed = True
             self._save_state()
 
     def kill(self) -> None:

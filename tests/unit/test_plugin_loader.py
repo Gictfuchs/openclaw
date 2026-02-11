@@ -44,7 +44,7 @@ class HelloTool(BaseTool):
         (tmp_path / "hello.py").write_text(plugin_code)
 
         registry = ToolRegistry()
-        loader = PluginLoader(str(tmp_path), registry)
+        loader = PluginLoader(str(tmp_path), registry, allow_unsigned=True)
         loaded = loader.scan_and_load()
 
         assert "hello_plugin" in loaded
@@ -82,7 +82,7 @@ class VersionTool(BaseTool):
         (tmp_path / "version.py").write_text(plugin_code_v1)
 
         registry = ToolRegistry()
-        loader = PluginLoader(str(tmp_path), registry)
+        loader = PluginLoader(str(tmp_path), registry, allow_unsigned=True)
         loader.scan_and_load()
 
         tool = registry.get("version_plugin")
@@ -117,7 +117,7 @@ class VersionTool(BaseTool):
         )
 
         registry = ToolRegistry()
-        loader = PluginLoader(str(tmp_path), registry)
+        loader = PluginLoader(str(tmp_path), registry, allow_unsigned=True)
         loader.scan_and_load()
 
         plugins = loader.list_plugins()

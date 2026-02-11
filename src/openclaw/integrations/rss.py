@@ -1,4 +1,9 @@
-"""RSS feed parser client."""
+"""RSS feed parser client.
+
+Security:
+- URL validation prevents SSRF (Server-Side Request Forgery)
+- Response size is capped to prevent memory exhaustion
+"""
 
 from __future__ import annotations
 
@@ -8,7 +13,12 @@ import feedparser
 import httpx
 import structlog
 
+from openclaw.integrations import validate_url
+
 logger = structlog.get_logger()
+
+# Maximum RSS response size (2 MB) — feeds larger than this are rejected
+_MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 
 
 @dataclass
@@ -38,17 +48,30 @@ class RSSClient:
         self._http = httpx.AsyncClient(
             timeout=timeout,
             follow_redirects=True,
+            max_redirects=5,
             headers={"User-Agent": "FochsBot/0.1 (+https://github.com/Gictfuchs/openclaw)"},
         )
 
     async def fetch_feed(self, url: str, limit: int = 10) -> FeedResult:
         """Fetch and parse an RSS/Atom feed."""
+        # --- SSRF validation ---
+        url_error = validate_url(url)
+        if url_error:
+            raise ValueError(f"Unsafe feed URL: {url_error}")
+
         try:
             resp = await self._http.get(url)
             resp.raise_for_status()
         except Exception as e:
             logger.error("rss_fetch_error", url=url, error=str(e))
             raise
+
+        # --- Response size check ---
+        content_length = len(resp.content)
+        if content_length > _MAX_RESPONSE_BYTES:
+            msg = f"RSS response too large: {content_length} bytes (max {_MAX_RESPONSE_BYTES})"
+            logger.warning("rss_response_too_large", url=url, size=content_length)
+            raise ValueError(msg)
 
         feed = feedparser.parse(resp.text)
 

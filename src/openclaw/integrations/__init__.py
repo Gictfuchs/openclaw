@@ -6,7 +6,7 @@ Shared utilities for all integration modules.
 from __future__ import annotations
 
 import re
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 # Safe ID pattern: alphanumeric, hyphens, underscores, dots, colons
 _SAFE_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_\-.:]+$")
@@ -53,3 +53,94 @@ def safe_url_path(value: str) -> str:
     Defense-in-depth: even after validate_id(), URL-encode the value.
     """
     return quote(value, safe="")
+
+
+# -----------------------------------------------------------------------
+# URL validation (SSRF prevention)
+# -----------------------------------------------------------------------
+
+# Domains that must never be fetched
+_BLOCKED_HOSTS = frozenset(
+    {
+        "localhost",
+        "127.0.0.1",
+        "0.0.0.0",  # noqa: S104
+        "169.254.169.254",  # AWS IMDS
+        "metadata.google.internal",  # GCP metadata
+        "[::1]",
+    }
+)
+
+
+def validate_url(url: str) -> str | None:
+    """Validate a URL for safe external fetching (SSRF prevention).
+
+    Returns an error string if the URL is unsafe, or None if safe.
+    """
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return "Invalid URL"
+
+    if parsed.scheme not in ("http", "https"):
+        return f"Unsupported scheme: {parsed.scheme}. Only http/https allowed."
+
+    hostname = (parsed.hostname or "").lower()
+
+    if not hostname:
+        return "Missing hostname"
+
+    if hostname in _BLOCKED_HOSTS:
+        return f"Blocked host: {hostname}"
+
+    # Block private IP ranges (RFC 1918 + link-local)
+    if (
+        hostname.startswith("10.")
+        or hostname.startswith("192.168.")
+        or hostname.startswith("172.16.")
+        or hostname.startswith("172.17.")
+        or hostname.startswith("172.18.")
+        or hostname.startswith("172.19.")
+        or hostname.startswith("172.2")
+        or hostname.startswith("172.30.")
+        or hostname.startswith("172.31.")
+        or hostname.startswith("169.254.")
+        or hostname.startswith("fc")
+        or hostname.startswith("fd")
+    ):
+        return "Private/internal IP addresses are not allowed."
+
+    return None
+
+
+# -----------------------------------------------------------------------
+# Response size safety
+# -----------------------------------------------------------------------
+
+# Default maximum response size: 5 MB
+_DEFAULT_MAX_RESPONSE_BYTES = 5 * 1024 * 1024
+
+
+def check_response_size(
+    response_content: bytes,
+    max_bytes: int = _DEFAULT_MAX_RESPONSE_BYTES,
+    context: str = "",
+) -> None:
+    """Raise ValueError if a response exceeds the size limit.
+
+    Call this after receiving an HTTP response to prevent memory exhaustion
+    from unexpectedly large API responses.
+
+    Args:
+        response_content: The raw response content bytes.
+        max_bytes: Maximum allowed size in bytes.
+        context: Description of the request (for error messages).
+
+    Raises:
+        ValueError: If the response exceeds max_bytes.
+    """
+    size = len(response_content)
+    if size > max_bytes:
+        ctx = f" ({context})" if context else ""
+        msg = f"Response too large{ctx}: {size} bytes (max {max_bytes})"
+        raise ValueError(msg)

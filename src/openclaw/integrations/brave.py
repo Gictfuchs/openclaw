@@ -5,6 +5,8 @@ from dataclasses import dataclass, field
 import httpx
 import structlog
 
+from openclaw.integrations import check_response_size
+
 logger = structlog.get_logger()
 
 _BRAVE_SEARCH_URL = "https://api.search.brave.com/res/v1/web/search"
@@ -73,6 +75,7 @@ class BraveSearchClient:
         try:
             resp = await self._client.get(_BRAVE_SEARCH_URL, params=params)
             resp.raise_for_status()
+            check_response_size(resp.content, context="brave_search")
             data = resp.json()
         except httpx.HTTPStatusError as e:
             logger.error("brave_search_http_error", status=e.response.status_code, query=query)

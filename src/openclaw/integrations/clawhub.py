@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 import httpx
 import structlog
 
-from openclaw.integrations import validate_id
+from openclaw.integrations import check_response_size, validate_id
 
 if TYPE_CHECKING:
     from openclaw.integrations.virustotal import ScanResult, VirusTotalClient
@@ -97,6 +97,7 @@ class ClawHubClient:
                 params={"q": query, "limit": min(limit, 50)},
             )
             resp.raise_for_status()
+            check_response_size(resp.content, context="clawhub_search")
             data = resp.json()
         except httpx.HTTPStatusError as e:
             logger.error("clawhub_search_error", status=e.response.status_code, query=query)
