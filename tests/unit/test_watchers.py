@@ -279,7 +279,7 @@ class TestEmailWatcher:
             is_read=False,
         )
         email_client = AsyncMock()
-        email_client.fetch_emails.return_value = [mail]
+        email_client.fetch_recent.return_value = [mail]
 
         tg = _make_telegram()
         watcher = EmailWatcher(email_client=email_client, telegram=tg, settings=_make_settings())
@@ -305,7 +305,7 @@ class TestEmailWatcher:
             is_read=True,
         )
         email_client = AsyncMock()
-        email_client.fetch_emails.return_value = [mail]
+        email_client.fetch_recent.return_value = [mail]
 
         watcher = EmailWatcher(email_client=email_client, telegram=_make_telegram(), settings=_make_settings())
         sub = _make_subscription(watcher_type="email", target="inbox")

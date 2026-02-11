@@ -446,6 +446,15 @@ class FochsApp:
                 await self.telegram.app.updater.stop()  # type: ignore[union-attr]
                 await self.telegram.app.stop()
                 await self.telegram.app.shutdown()
+            # Close integration HTTP clients
+            for client in (self._brave, self._scraper, self._github, self._rss):
+                if client and hasattr(client, "close"):
+                    try:
+                        result = client.close()
+                        if hasattr(result, "__await__"):
+                            await result
+                    except Exception:  # noqa: BLE001
+                        pass
             await close_db()
 
     @staticmethod

@@ -4,11 +4,10 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import pytest
 from fastapi.testclient import TestClient
 
 from openclaw.config import Settings
-from openclaw.web.auth import do_login, do_logout, is_authenticated, require_auth
+from openclaw.web.auth import do_login, do_logout, is_authenticated
 from openclaw.web.routes.chat import WEB_USER_ID, _event_to_dict
 from openclaw.web.server import create_app
 
@@ -48,21 +47,6 @@ class TestAuth:
         request.session = session
         do_logout(request)
         assert len(session) == 0
-
-    def test_require_auth_raises(self) -> None:
-        from fastapi import HTTPException
-
-        request = MagicMock()
-        request.session = {}
-        with pytest.raises(HTTPException) as exc_info:
-            require_auth(request)
-        assert exc_info.value.status_code == 401
-
-    def test_require_auth_passes(self) -> None:
-        request = MagicMock()
-        request.session = {"authenticated": True}
-        result = require_auth(request)
-        assert result is request
 
 
 # ---------------------------------------------------------------------------

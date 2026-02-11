@@ -8,7 +8,7 @@ from __future__ import annotations
 import ipaddress
 import re
 import socket
-from urllib.parse import quote, urlparse
+from urllib.parse import urlparse
 
 # Safe ID pattern: alphanumeric, hyphens, underscores, dots, colons
 _SAFE_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_\-.:]+$")
@@ -47,14 +47,6 @@ def validate_id(value: str, field_name: str = "id") -> str:
         raise ValueError(msg)
 
     return value
-
-
-def safe_url_path(value: str) -> str:
-    """URL-encode a value for safe use in URL path segments.
-
-    Defense-in-depth: even after validate_id(), URL-encode the value.
-    """
-    return quote(value, safe="")
 
 
 # -----------------------------------------------------------------------

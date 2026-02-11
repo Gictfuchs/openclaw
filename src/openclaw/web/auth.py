@@ -12,9 +12,12 @@ import hmac
 import secrets
 import time
 from collections import defaultdict
+from typing import TYPE_CHECKING
 
 import structlog
-from fastapi import HTTPException, Request
+
+if TYPE_CHECKING:
+    from fastapi import Request
 
 logger = structlog.get_logger()
 
@@ -134,10 +137,3 @@ def do_login(request: Request, secret: str) -> bool:
 def do_logout(request: Request) -> None:
     """Clear the session."""
     request.session.clear()
-
-
-def require_auth(request: Request) -> Request:
-    """FastAPI dependency that returns 401 if not authenticated."""
-    if not is_authenticated(request):
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    return request

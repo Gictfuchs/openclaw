@@ -42,7 +42,7 @@ class EmailWatcher(BaseWatcher):
                 logger.error("email_check_failed", error=str(e))
 
     async def _check_inbox(self, sub_id: int, user_id: int) -> None:
-        emails = await self.email_client.fetch_emails(folder="INBOX", limit=10)
+        emails = await self.email_client.fetch_recent(folder="INBOX", limit=10)
 
         if not emails:
             return
