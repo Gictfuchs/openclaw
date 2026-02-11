@@ -5,9 +5,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from openclaw.cli._helpers import find_project_dir
 from openclaw.cli.update import (
     _detect_service_manager,
-    _find_project_dir,
     _restart_service,
     _run,
 )
@@ -117,14 +117,14 @@ class TestFindProjectDir:
     def test_finds_pyproject_in_cwd(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         (tmp_path / "pyproject.toml").write_text("[project]\nname = 'test'\n")
         monkeypatch.chdir(tmp_path)
-        assert _find_project_dir() == tmp_path
+        assert find_project_dir() == tmp_path
 
     def test_walks_up_parents(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         (tmp_path / "pyproject.toml").write_text("[project]\nname = 'test'\n")
         sub = tmp_path / "src" / "deep"
         sub.mkdir(parents=True)
         monkeypatch.chdir(sub)
-        assert _find_project_dir() == tmp_path
+        assert find_project_dir() == tmp_path
 
 
 # ---------------------------------------------------------------------------

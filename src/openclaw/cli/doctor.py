@@ -13,7 +13,10 @@ import socket
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from openclaw.config import Settings
 
 from openclaw.cli.output import (
     BOLD,
@@ -88,7 +91,7 @@ def _check_system(report: DoctorReport) -> None:
             report.err(f"{label} not found")
 
 
-def _check_config(report: DoctorReport) -> Any | None:
+def _check_config(report: DoctorReport) -> Settings | None:
     """Validate configuration. Returns Settings object if valid."""
     header("Configuration")
 
@@ -153,7 +156,7 @@ def _check_config(report: DoctorReport) -> Any | None:
     return settings
 
 
-def _check_directories(report: DoctorReport, settings: Any) -> None:
+def _check_directories(report: DoctorReport, settings: Settings) -> None:
     """Check data directories."""
     header("Directories")
 
@@ -178,7 +181,7 @@ def _check_directories(report: DoctorReport, settings: Any) -> None:
         info(f"Plugins directory: {plugins_dir} (not created yet)")
 
 
-async def _check_llm(report: DoctorReport, settings: Any) -> None:
+async def _check_llm(report: DoctorReport, settings: Settings) -> None:
     """Check LLM provider connectivity."""
     header("LLM Providers")
 
@@ -209,7 +212,7 @@ async def _check_llm(report: DoctorReport, settings: Any) -> None:
         report.err(f"LLM connectivity check failed: {e}")
 
 
-async def _check_database(report: DoctorReport, settings: Any) -> None:
+async def _check_database(report: DoctorReport, settings: Settings) -> None:
     """Check database connectivity."""
     header("Database")
 
@@ -231,7 +234,7 @@ async def _check_database(report: DoctorReport, settings: Any) -> None:
         report.err(f"Database initialization failed: {e}")
 
 
-def _check_budget_state(report: DoctorReport, settings: Any) -> None:
+def _check_budget_state(report: DoctorReport, settings: Settings) -> None:
     """Check budget state file."""
     header("Token Budget")
 
@@ -254,7 +257,7 @@ def _check_budget_state(report: DoctorReport, settings: Any) -> None:
         info("No budget state file yet (will be created on first API call)")
 
 
-def _check_optional_integrations(report: DoctorReport, settings: Any) -> None:
+def _check_optional_integrations(report: DoctorReport, settings: Settings) -> None:
     """Report optional integration status."""
     header("Optional Integrations")
 
@@ -309,7 +312,7 @@ def _check_launchd(report: DoctorReport) -> None:
             else:
                 report.warn("Plist exists but service is not loaded")
                 info(f"Run: launchctl load {plist_path}")
-        except Exception:
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
             report.warn("Could not check launchctl status")
     else:
         info("No launchd plist found (optional)")
@@ -344,7 +347,7 @@ def _check_systemd(report: DoctorReport) -> None:
         else:
             report.warn(f"Service is {result.stdout.strip()} (not enabled)")
             info("Run: sudo systemctl enable fochs")
-    except Exception:
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
         report.warn("Could not check systemd enabled status")
 
     # Check active
@@ -363,11 +366,11 @@ def _check_systemd(report: DoctorReport) -> None:
             info("Run: sudo systemctl start fochs")
         else:
             report.err(f"Service status: {status}")
-    except Exception:
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
         report.warn("Could not check systemd active status")
 
 
-def _check_disk_space(report: DoctorReport, settings: Any) -> None:
+def _check_disk_space(report: DoctorReport, settings: Settings) -> None:
     """Check available disk space in the data directory."""
     header("Disk Space")
 
@@ -390,7 +393,7 @@ def _check_disk_space(report: DoctorReport, settings: Any) -> None:
         report.warn(f"Could not check disk space: {e}")
 
 
-def _check_port(report: DoctorReport, settings: Any) -> None:
+def _check_port(report: DoctorReport, settings: Settings) -> None:
     """Check if the web dashboard port is available."""
     header("Network")
 

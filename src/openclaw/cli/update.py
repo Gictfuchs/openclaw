@@ -7,11 +7,18 @@ Handles both macOS (launchctl) and Linux (systemctl).
 from __future__ import annotations
 
 import platform
-import shutil
 import subprocess
 import sys
 from pathlib import Path
 
+from openclaw.cli._helpers import (
+    TIMEOUT_GIT_FETCH,
+    TIMEOUT_GIT_PULL,
+    TIMEOUT_SERVICE_CMD,
+    TIMEOUT_STATUS_CMD,
+    find_project_dir,
+    run_uv_sync,
+)
 from openclaw.cli.output import BOLD, RESET, err, header, info, ok, warn
 
 # ---------------------------------------------------------------------------
@@ -40,7 +47,7 @@ def _detect_service_manager() -> str | None:
     system = platform.system()
     if system == "Linux":
         try:
-            result = _run(["systemctl", "is-enabled", "fochs"], timeout=5)
+            result = _run(["systemctl", "is-enabled", "fochs"], timeout=TIMEOUT_STATUS_CMD)
             if result.returncode == 0:
                 return "systemd"
         except (FileNotFoundError, subprocess.TimeoutExpired):
@@ -56,27 +63,16 @@ def _restart_service(manager: str) -> bool:
     """Restart the Fochs service. Returns True on success."""
     try:
         if manager == "systemd":
-            result = _run(["sudo", "systemctl", "restart", "fochs"], timeout=15)
+            result = _run(["sudo", "systemctl", "restart", "fochs"], timeout=TIMEOUT_SERVICE_CMD)
             return result.returncode == 0
         if manager == "launchd":
             label = "com.fochs.bot"
-            _run(["launchctl", "stop", label], timeout=5)
-            result = _run(["launchctl", "start", label], timeout=5)
+            _run(["launchctl", "stop", label], timeout=TIMEOUT_STATUS_CMD)
+            result = _run(["launchctl", "start", label], timeout=TIMEOUT_STATUS_CMD)
             return result.returncode == 0
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return False
     return False
-
-
-def _find_project_dir() -> Path:
-    """Locate the project root (directory containing pyproject.toml)."""
-    project_dir = Path.cwd()
-    if (project_dir / "pyproject.toml").is_file():
-        return project_dir
-    for parent in project_dir.parents:
-        if (parent / "pyproject.toml").is_file():
-            return parent
-    return project_dir
 
 
 # ---------------------------------------------------------------------------
@@ -90,7 +86,7 @@ def run_update(*, dry_run: bool = False, restart: bool = True) -> None:
     print(f"  {BOLD}\U0001f98a Fochs Update{RESET}")
     print()
 
-    project_dir = _find_project_dir()
+    project_dir = find_project_dir()
 
     if not (project_dir / ".git").is_dir():
         err("Not a git repository — cannot update")
@@ -99,7 +95,7 @@ def run_update(*, dry_run: bool = False, restart: bool = True) -> None:
     # Step 1: git fetch + check for updates
     header("Checking for updates")
     try:
-        fetch = _run(["git", "-C", str(project_dir), "fetch", "origin"], timeout=30)
+        fetch = _run(["git", "-C", str(project_dir), "fetch", "origin"], timeout=TIMEOUT_GIT_FETCH)
     except subprocess.TimeoutExpired:
         err("git fetch timed out")
         sys.exit(1)
@@ -137,7 +133,7 @@ def run_update(*, dry_run: bool = False, restart: bool = True) -> None:
     # Step 3: git pull
     header("Pulling updates")
     try:
-        pull = _run(["git", "-C", str(project_dir), "pull", "origin", "main"], timeout=120)
+        pull = _run(["git", "-C", str(project_dir), "pull", "origin", "main"], timeout=TIMEOUT_GIT_PULL)
     except subprocess.TimeoutExpired:
         err("git pull timed out")
         sys.exit(1)
@@ -149,19 +145,7 @@ def run_update(*, dry_run: bool = False, restart: bool = True) -> None:
 
     # Step 4: uv sync
     header("Installing dependencies")
-    if shutil.which("uv"):
-        try:
-            sync = _run(["uv", "sync"], cwd=project_dir, timeout=300)
-            if sync.returncode == 0:
-                ok("Dependencies updated")
-            else:
-                err(f"uv sync failed: {sync.stderr[:200]}")
-                warn("Dependencies may be out of date")
-        except subprocess.TimeoutExpired:
-            err("uv sync timed out")
-            warn("Dependencies may be out of date")
-    else:
-        warn("uv not found — skipping dependency update")
+    run_uv_sync(project_dir)
 
     # Step 5: Optional service restart
     if restart:

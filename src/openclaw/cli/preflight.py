@@ -12,10 +12,10 @@ Runs the complete sequence from fresh clone to ready-to-run:
 from __future__ import annotations
 
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 
+from openclaw.cli._helpers import find_project_dir, run_uv_sync
 from openclaw.cli.output import BOLD, RESET, err, header, info, ok, warn
 
 # ---------------------------------------------------------------------------
@@ -45,28 +45,6 @@ def _check_prereqs() -> bool:
     return all_ok
 
 
-def _run_uv_sync(project_dir: Path) -> bool:
-    """Install dependencies via ``uv sync``."""
-    header("Step 2/4: Install Dependencies")
-    info("Running uv sync...")
-    try:
-        result = subprocess.run(
-            ["uv", "sync"],
-            cwd=project_dir,
-            capture_output=True,
-            text=True,
-            timeout=300,
-        )
-        if result.returncode == 0:
-            ok("Dependencies installed")
-            return True
-        err(f"uv sync failed: {result.stderr[:300]}")
-        return False
-    except subprocess.TimeoutExpired:
-        err("uv sync timed out (5 minutes)")
-        return False
-
-
 def _ensure_env_file(project_dir: Path) -> None:
     """Copy ``.env.example`` to ``.env`` if ``.env`` does not exist."""
     env_path = project_dir / ".env"
@@ -81,27 +59,37 @@ def _ensure_env_file(project_dir: Path) -> None:
 
 
 def _ensure_dirs(project_dir: Path) -> None:
-    """Create data, plugins, logs, and chroma directories."""
+    """Create data, plugins, logs, and chroma directories.
+
+    Reads FOCHS_DATA_DIR / FOCHS_PLUGINS_DIR from ``.env`` when available,
+    otherwise falls back to sensible defaults.
+    """
+    # Try to read config-aware paths from .env
+    data_dir = project_dir / "data"
+    plugins_dir = project_dir / "plugins"
+
+    env_path = project_dir / ".env"
+    if env_path.is_file():
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line.startswith("FOCHS_DATA_DIR="):
+                raw = line.split("=", 1)[1].strip().strip("'\"")
+                candidate = Path(raw)
+                data_dir = candidate if candidate.is_absolute() else project_dir / candidate
+            elif line.startswith("FOCHS_PLUGINS_DIR="):
+                raw = line.split("=", 1)[1].strip().strip("'\"")
+                candidate = Path(raw)
+                plugins_dir = candidate if candidate.is_absolute() else project_dir / candidate
+
     dirs = [
-        project_dir / "data",
-        project_dir / "data" / "chroma",
-        project_dir / "data" / "logs",
-        project_dir / "plugins",
+        data_dir,
+        data_dir / "chroma",
+        data_dir / "logs",
+        plugins_dir,
     ]
     for d in dirs:
         d.mkdir(parents=True, exist_ok=True)
     ok(f"Directories ready ({len(dirs)} dirs)")
-
-
-def _find_project_dir() -> Path:
-    """Locate the project root (directory containing pyproject.toml)."""
-    project_dir = Path.cwd()
-    if (project_dir / "pyproject.toml").is_file():
-        return project_dir
-    for parent in project_dir.parents:
-        if (parent / "pyproject.toml").is_file():
-            return parent
-    return project_dir
 
 
 # ---------------------------------------------------------------------------
@@ -115,7 +103,7 @@ def run_preflight(*, non_interactive: bool = False) -> None:
     print(f"  {BOLD}\U0001f98a Fochs Preflight — Bootstrap{RESET}")
     print()
 
-    project_dir = _find_project_dir()
+    project_dir = find_project_dir()
 
     if not (project_dir / "pyproject.toml").is_file():
         err("Not in a Fochs project (no pyproject.toml found)")
@@ -129,7 +117,8 @@ def run_preflight(*, non_interactive: bool = False) -> None:
         sys.exit(1)
 
     # 2. uv sync
-    if not _run_uv_sync(project_dir):
+    header("Step 2/4: Install Dependencies")
+    if not run_uv_sync(project_dir):
         err("Dependency installation failed")
         sys.exit(1)
 
@@ -152,7 +141,7 @@ def run_preflight(*, non_interactive: bool = False) -> None:
         from openclaw.cli.doctor import run_doctor
 
         asyncio.run(run_doctor())
-    except Exception as e:
+    except (ImportError, OSError) as e:
         warn(f"Health check encountered an error: {e}")
         info("Run 'fochs doctor' manually to diagnose")
 

@@ -12,11 +12,11 @@ import os
 import platform
 import secrets
 import shutil
-import subprocess
 import sys
 import textwrap
 from pathlib import Path
 
+from openclaw.cli._helpers import find_project_dir, run_uv_sync
 from openclaw.cli.output import (
     BOLD,
     DIM,
@@ -124,31 +124,6 @@ def _copy_env_example_if_needed(project_dir: Path) -> None:
     if not env_path.is_file() and example_path.is_file():
         shutil.copy2(example_path, env_path)
         info(f"Copied {example_path.name} as starting point")
-
-
-def _run_uv_sync(project_dir: Path) -> bool:
-    """Run ``uv sync`` to install dependencies. Returns True on success."""
-    if not shutil.which("uv"):
-        warn("uv not found — skipping dependency install")
-        return False
-
-    info("Running uv sync to install dependencies...")
-    try:
-        result = subprocess.run(
-            ["uv", "sync"],
-            cwd=project_dir,
-            capture_output=True,
-            text=True,
-            timeout=300,
-        )
-        if result.returncode == 0:
-            ok("Dependencies installed")
-            return True
-        err(f"uv sync failed: {result.stderr[:200]}")
-        return False
-    except subprocess.TimeoutExpired:
-        err("uv sync timed out (5 minutes)")
-        return False
 
 
 def _ensure_project_dirs(project_dir: Path, values: dict[str, str]) -> None:
@@ -304,20 +279,6 @@ def _write_env(env_path: Path, values: dict[str, str]) -> None:
     ]
 
     for section_name, keys in sections:
-        # Check if any key in this section has a value
-        has_values = any(values.get(k) for k, _ in keys)
-        if not has_values:
-            # Still write the section but commented out
-            lines.append(f"# --- {section_name} ---")
-            for key, _comment in keys:
-                val = values.get(key, "")
-                if val:
-                    lines.append(f"{key}={val}")
-                else:
-                    lines.append(f"# {key}=")
-            lines.append("")
-            continue
-
         lines.append(f"# --- {section_name} ---")
         for key, _comment in keys:
             val = values.get(key, "")
@@ -492,7 +453,7 @@ def _run_interactive_setup(project_dir: Path, generate_plist: bool = False) -> N
 
     # Run uv sync if available
     if _check_command("uv") and _prompt_yn("Install/update dependencies with uv sync?"):
-        _run_uv_sync(project_dir)
+        run_uv_sync(project_dir)
 
     # ── Step 2: LLM Provider ──────────────────────────────────────────
     header("Step 2/6: LLM Provider (required)")
@@ -746,14 +707,7 @@ def _run_interactive_setup(project_dir: Path, generate_plist: bool = False) -> N
 
 def run_setup(*, non_interactive: bool = False, generate_plist: bool = False) -> None:
     """Entry point called from CLI."""
-    # Find project directory (where pyproject.toml lives)
-    project_dir = Path.cwd()
-    if not (project_dir / "pyproject.toml").is_file():
-        # Try parent directories
-        for parent in project_dir.parents:
-            if (parent / "pyproject.toml").is_file():
-                project_dir = parent
-                break
+    project_dir = find_project_dir()
 
     if non_interactive:
         result = _validate_existing_config(project_dir)

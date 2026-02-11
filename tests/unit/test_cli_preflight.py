@@ -3,14 +3,10 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from openclaw.cli.preflight import (
     _check_prereqs,
     _ensure_dirs,
     _ensure_env_file,
-    _find_project_dir,
-    _run_uv_sync,
 )
 
 # ---------------------------------------------------------------------------
@@ -64,35 +60,6 @@ class TestCheckPrereqs:
 
 
 # ---------------------------------------------------------------------------
-# uv sync
-# ---------------------------------------------------------------------------
-
-
-class TestRunUvSync:
-    def test_success(self, tmp_path: Path) -> None:
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        with patch("openclaw.cli.preflight.subprocess.run", return_value=mock_result):
-            assert _run_uv_sync(tmp_path) is True
-
-    def test_failure(self, tmp_path: Path) -> None:
-        mock_result = MagicMock()
-        mock_result.returncode = 1
-        mock_result.stderr = "error: some problem"
-        with patch("openclaw.cli.preflight.subprocess.run", return_value=mock_result):
-            assert _run_uv_sync(tmp_path) is False
-
-    def test_timeout(self, tmp_path: Path) -> None:
-        import subprocess
-
-        with patch(
-            "openclaw.cli.preflight.subprocess.run",
-            side_effect=subprocess.TimeoutExpired(cmd="uv sync", timeout=300),
-        ):
-            assert _run_uv_sync(tmp_path) is False
-
-
-# ---------------------------------------------------------------------------
 # Env file handling
 # ---------------------------------------------------------------------------
 
@@ -135,26 +102,26 @@ class TestEnsureDirs:
         _ensure_dirs(tmp_path)
         assert (tmp_path / "data").is_dir()
 
+    def test_respects_data_dir_from_env(self, tmp_path: Path) -> None:
+        """Should read FOCHS_DATA_DIR from .env when available."""
+        env_content = "FOCHS_DATA_DIR=./custom_data\n"
+        (tmp_path / ".env").write_text(env_content)
+        _ensure_dirs(tmp_path)
+        assert (tmp_path / "custom_data").is_dir()
+        assert (tmp_path / "custom_data" / "chroma").is_dir()
+        assert (tmp_path / "custom_data" / "logs").is_dir()
 
-# ---------------------------------------------------------------------------
-# Project root discovery
-# ---------------------------------------------------------------------------
+    def test_respects_plugins_dir_from_env(self, tmp_path: Path) -> None:
+        """Should read FOCHS_PLUGINS_DIR from .env when available."""
+        env_content = "FOCHS_PLUGINS_DIR=./my_plugins\n"
+        (tmp_path / ".env").write_text(env_content)
+        _ensure_dirs(tmp_path)
+        assert (tmp_path / "my_plugins").is_dir()
 
-
-class TestFindProjectDir:
-    def test_finds_pyproject_in_cwd(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        (tmp_path / "pyproject.toml").write_text("[project]\nname = 'test'\n")
-        monkeypatch.chdir(tmp_path)
-        assert _find_project_dir() == tmp_path
-
-    def test_walks_up_parents(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        (tmp_path / "pyproject.toml").write_text("[project]\nname = 'test'\n")
-        sub = tmp_path / "src" / "deep"
-        sub.mkdir(parents=True)
-        monkeypatch.chdir(sub)
-        assert _find_project_dir() == tmp_path
-
-    def test_returns_cwd_when_not_found(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.chdir(tmp_path)
-        result = _find_project_dir()
-        assert result == tmp_path
+    def test_handles_absolute_path_in_env(self, tmp_path: Path) -> None:
+        """Should handle absolute paths in .env."""
+        abs_data = tmp_path / "abs_data"
+        env_content = f"FOCHS_DATA_DIR={abs_data}\n"
+        (tmp_path / ".env").write_text(env_content)
+        _ensure_dirs(tmp_path)
+        assert abs_data.is_dir()
