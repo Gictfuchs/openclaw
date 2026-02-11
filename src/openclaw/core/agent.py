@@ -150,7 +150,7 @@ class FochsAgent:
         availability = await self.llm.check_availability()
         budget_status = {}
         if self.llm.budget:
-            budget_status = self.llm.budget.get_status()
+            budget_status = await self.llm.budget.get_status()
         memory_stats = {}
         if self.memory:
             memory_stats = await self.memory.get_stats()

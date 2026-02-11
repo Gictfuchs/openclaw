@@ -12,6 +12,8 @@ from dataclasses import dataclass
 import httpx
 import structlog
 
+from openclaw.integrations import check_response_size
+
 logger = structlog.get_logger()
 
 _VT_API_URL = "https://www.virustotal.com/api/v3"
@@ -58,6 +60,7 @@ class VirusTotalClient:
                 data={"url": url},
             )
             resp.raise_for_status()
+            check_response_size(resp.content, context="vt_scan_url")
             data = resp.json()
             analysis_id = data.get("data", {}).get("id", "")
 
@@ -85,6 +88,7 @@ class VirusTotalClient:
         try:
             resp = await self._client.get(f"{_VT_API_URL}/files/{file_hash}")
             resp.raise_for_status()
+            check_response_size(resp.content, context="vt_scan_file_hash")
             data = resp.json()
 
             attrs = data.get("data", {}).get("attributes", {})
@@ -126,6 +130,7 @@ class VirusTotalClient:
         try:
             resp = await self._client.get(f"{_VT_API_URL}/analyses/{analysis_id}")
             resp.raise_for_status()
+            check_response_size(resp.content, context="vt_analysis")
             data = resp.json()
 
             attrs = data.get("data", {}).get("attributes", {})

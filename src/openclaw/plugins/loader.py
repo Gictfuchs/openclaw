@@ -1,12 +1,15 @@
 """Plugin loader - discovers and hot-reloads BaseTool subclasses from a directory.
 
-Security: All plugin files are verified via SHA-256 hash allowlist before
-exec(). Unsigned plugins are rejected unless ``allow_unsigned=True``.
+Security:
+- All plugin files are verified via SHA-256 hash allowlist before exec().
+- Unsigned plugins are rejected unless ``allow_unsigned=True``.
+- Manifest integrity is protected via HMAC-SHA256 (when ``manifest_hmac_key`` is set).
 """
 
 from __future__ import annotations
 
 import hashlib
+import hmac
 import inspect
 import json
 import sys
@@ -50,24 +53,79 @@ class PluginLoader:
         registry: ToolRegistry,
         *,
         allow_unsigned: bool = False,
+        manifest_hmac_key: str = "",
     ) -> None:
         self._dir = Path(plugins_dir)
         self._registry = registry
         self._allow_unsigned = allow_unsigned
+        self._hmac_key = manifest_hmac_key.encode("utf-8") if manifest_hmac_key else b""
         self._loaded_modules: dict[str, str] = {}  # module_name -> file_path
         self._manifest: dict[str, str] = {}  # filename -> sha256 hex
         self._load_manifest()
 
+    @staticmethod
+    def _compute_manifest_hmac(files_json: str, key: bytes) -> str:
+        """Compute HMAC-SHA256 over the canonical JSON of the files dict."""
+        return hmac.new(key, files_json.encode("utf-8"), hashlib.sha256).hexdigest()
+
     def _load_manifest(self) -> None:
-        """Load the ``plugins.sha256`` hash manifest if present."""
+        """Load the ``plugins.sha256`` hash manifest if present.
+
+        If ``manifest_hmac_key`` is set, the manifest must contain an ``hmac``
+        field that matches the HMAC-SHA256 of the ``files`` JSON.  This prevents
+        an attacker from modifying both the plugin files *and* the manifest
+        without knowing the HMAC secret.
+
+        Supported manifest formats:
+        - Legacy (plain dict): ``{"file.py": "sha256hex", ...}``
+        - Signed (HMAC): ``{"files": {...}, "hmac": "..."}``
+        """
         manifest_path = self._dir / "plugins.sha256"
         if not manifest_path.is_file():
             return
         try:
-            data = json.loads(manifest_path.read_text(encoding="utf-8"))
-            if isinstance(data, dict):
+            raw = manifest_path.read_text(encoding="utf-8")
+            data = json.loads(raw)
+            if not isinstance(data, dict):
+                logger.warning("plugin_manifest_invalid_format")
+                return
+
+            # Detect signed vs. legacy format
+            if "files" in data and "hmac" in data:
+                # --- Signed manifest ---
+                files_dict = data["files"]
+                manifest_hmac = data["hmac"]
+
+                if self._hmac_key:
+                    # Verify HMAC
+                    files_json = json.dumps(files_dict, sort_keys=True, separators=(",", ":"))
+                    expected_hmac = self._compute_manifest_hmac(files_json, self._hmac_key)
+                    if not hmac.compare_digest(manifest_hmac, expected_hmac):
+                        logger.error(
+                            "plugin_manifest_hmac_mismatch",
+                            msg="Manifest HMAC verification failed — rejecting all plugins",
+                        )
+                        # Do NOT load manifest — fail closed
+                        return
+                    logger.info("plugin_manifest_hmac_verified")
+                else:
+                    # No HMAC key configured — accept signed manifest but warn
+                    logger.warning(
+                        "plugin_manifest_signed_no_key", msg="Signed manifest found but no HMAC key configured"
+                    )
+
+                self._manifest = {k: v.lower() for k, v in files_dict.items()}
+            else:
+                # --- Legacy unsigned manifest ---
+                if self._hmac_key:
+                    logger.error(
+                        "plugin_manifest_unsigned_rejected",
+                        msg="HMAC key configured but manifest is unsigned — rejecting",
+                    )
+                    return
                 self._manifest = {k: v.lower() for k, v in data.items()}
-                logger.info("plugin_manifest_loaded", entries=len(self._manifest))
+
+            logger.info("plugin_manifest_loaded", entries=len(self._manifest))
         except Exception as e:
             logger.warning("plugin_manifest_load_error", error=str(e))
 
@@ -269,9 +327,24 @@ class PluginLoader:
         return manifest
 
     def save_manifest(self) -> Path:
-        """Generate and save the manifest to ``plugins.sha256``."""
+        """Generate and save the manifest to ``plugins.sha256``.
+
+        If ``manifest_hmac_key`` is set, the manifest is saved in signed
+        format with an HMAC-SHA256 signature.  Otherwise uses legacy format.
+        """
         manifest = self.generate_manifest()
         manifest_path = self._dir / "plugins.sha256"
-        manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-        logger.info("plugin_manifest_saved", path=str(manifest_path), entries=len(manifest))
+
+        if self._hmac_key:
+            # Signed format: {"files": {...}, "hmac": "..."}
+            files_json = json.dumps(manifest, sort_keys=True, separators=(",", ":"))
+            signature = self._compute_manifest_hmac(files_json, self._hmac_key)
+            signed_data = {"files": manifest, "hmac": signature}
+            manifest_path.write_text(json.dumps(signed_data, indent=2), encoding="utf-8")
+            logger.info("plugin_manifest_saved_signed", path=str(manifest_path), entries=len(manifest))
+        else:
+            # Legacy unsigned format
+            manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+            logger.info("plugin_manifest_saved", path=str(manifest_path), entries=len(manifest))
+
         return manifest_path

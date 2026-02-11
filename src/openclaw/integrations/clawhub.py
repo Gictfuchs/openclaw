@@ -120,6 +120,7 @@ class ClawHubClient:
         try:
             resp = await self._client.get(f"{self._base_url}/skills/{skill_id}")
             resp.raise_for_status()
+            check_response_size(resp.content, context="clawhub_get_skill")
             data = resp.json()
         except httpx.HTTPStatusError as e:
             logger.error("clawhub_get_skill_error", status=e.response.status_code, skill_id=skill_id)
@@ -201,6 +202,7 @@ class ClawHubClient:
         try:
             resp = await self._client.post(f"{self._base_url}/skills/{skill_id}/install")
             resp.raise_for_status()
+            check_response_size(resp.content, context="clawhub_install")
             data = resp.json()
         except httpx.HTTPStatusError as e:
             logger.error("clawhub_install_error", status=e.response.status_code, skill_id=skill_id)

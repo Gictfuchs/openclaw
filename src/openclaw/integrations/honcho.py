@@ -12,7 +12,7 @@ from typing import Any
 import httpx
 import structlog
 
-from openclaw.integrations import validate_id
+from openclaw.integrations import check_response_size, validate_id
 
 logger = structlog.get_logger()
 
@@ -116,6 +116,7 @@ class HonchoClient:
                 json=payload,
             )
             resp.raise_for_status()
+            check_response_size(resp.content, context="honcho_create_session")
             data = resp.json()
         except httpx.HTTPStatusError as e:
             logger.error("honcho_create_session_error", status=e.response.status_code)
@@ -142,6 +143,7 @@ class HonchoClient:
                 f"{self._base_url}/apps/{self._app_id}/users/{user_id}/sessions",
             )
             resp.raise_for_status()
+            check_response_size(resp.content, context="honcho_list_sessions")
             data = resp.json()
         except httpx.HTTPStatusError as e:
             logger.error("honcho_list_sessions_error", status=e.response.status_code)
@@ -187,6 +189,7 @@ class HonchoClient:
                 f"{self._base_url}/apps/{self._app_id}/users/{user_id}/sessions/{session_id}/context",
             )
             resp.raise_for_status()
+            check_response_size(resp.content, context="honcho_get_context")
             data = resp.json()
         except httpx.HTTPStatusError as e:
             logger.error("honcho_get_context_error", status=e.response.status_code, session_id=session_id)
@@ -228,6 +231,7 @@ class HonchoClient:
                 json=payload,
             )
             resp.raise_for_status()
+            check_response_size(resp.content, context="honcho_add_message")
             data = resp.json()
         except httpx.HTTPStatusError as e:
             logger.error("honcho_add_message_error", status=e.response.status_code)
@@ -267,6 +271,7 @@ class HonchoClient:
                 json=payload,
             )
             resp.raise_for_status()
+            check_response_size(resp.content, context="honcho_create_collection")
             data = resp.json()
         except httpx.HTTPStatusError as e:
             logger.error("honcho_create_collection_error", status=e.response.status_code)
@@ -304,6 +309,7 @@ class HonchoClient:
                 json=payload,
             )
             resp.raise_for_status()
+            check_response_size(resp.content, context="honcho_add_to_collection")
             data = resp.json()
         except httpx.HTTPStatusError as e:
             logger.error("honcho_add_to_collection_error", status=e.response.status_code)
@@ -337,6 +343,7 @@ class HonchoClient:
                 json=payload,
             )
             resp.raise_for_status()
+            check_response_size(resp.content, context="honcho_query")
             data = resp.json()
         except httpx.HTTPStatusError as e:
             logger.error("honcho_query_error", status=e.response.status_code)

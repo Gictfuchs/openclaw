@@ -5,7 +5,9 @@ Shared utilities for all integration modules.
 
 from __future__ import annotations
 
+import ipaddress
 import re
+import socket
 from urllib.parse import quote, urlparse
 
 # Safe ID pattern: alphanumeric, hyphens, underscores, dots, colons
@@ -72,10 +74,32 @@ _BLOCKED_HOSTS = frozenset(
 )
 
 
+def _is_private_ip(addr: str) -> bool:
+    """Check if an IP address string is private/reserved using stdlib ipaddress.
+
+    Handles IPv4, IPv6, octal (0177.0.0.1), hex (0x7f.0.0.1), and
+    decimal-integer (2130706433) encodings because ``ipaddress.ip_address``
+    normalises them all.
+    """
+    try:
+        ip = ipaddress.ip_address(addr)
+    except ValueError:
+        return False
+    return ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local or ip.is_multicast or ip.is_unspecified
+
+
 def validate_url(url: str) -> str | None:
     """Validate a URL for safe external fetching (SSRF prevention).
 
     Returns an error string if the URL is unsafe, or None if safe.
+
+    Defence layers:
+    1. Scheme check (http/https only).
+    2. Hostname blocklist (known metadata endpoints).
+    3. Parsed-hostname IP check (catches octal, hex, decimal IPs).
+    4. DNS resolution check — resolves the hostname and verifies that
+       *every* resulting IP is public.  This catches DNS-rebinding
+       attacks where a hostname resolves to an internal IP.
     """
     try:
         parsed = urlparse(url)
@@ -90,25 +114,26 @@ def validate_url(url: str) -> str | None:
     if not hostname:
         return "Missing hostname"
 
-    if hostname in _BLOCKED_HOSTS:
+    # Strip IPv6 brackets for consistent checking
+    bare_host = hostname.strip("[]")
+
+    if bare_host in _BLOCKED_HOSTS or hostname in _BLOCKED_HOSTS:
         return f"Blocked host: {hostname}"
 
-    # Block private IP ranges (RFC 1918 + link-local)
-    if (
-        hostname.startswith("10.")
-        or hostname.startswith("192.168.")
-        or hostname.startswith("172.16.")
-        or hostname.startswith("172.17.")
-        or hostname.startswith("172.18.")
-        or hostname.startswith("172.19.")
-        or hostname.startswith("172.2")
-        or hostname.startswith("172.30.")
-        or hostname.startswith("172.31.")
-        or hostname.startswith("169.254.")
-        or hostname.startswith("fc")
-        or hostname.startswith("fd")
-    ):
+    # --- Layer 3: detect encoded/numeric IP addresses ---
+    if _is_private_ip(bare_host):
         return "Private/internal IP addresses are not allowed."
+
+    # --- Layer 4: DNS resolution check (anti DNS-rebinding) ---
+    try:
+        infos = socket.getaddrinfo(bare_host, None, proto=socket.IPPROTO_TCP)
+        for _family, _type, _proto, _canonname, sockaddr in infos:
+            resolved_ip = sockaddr[0]
+            if _is_private_ip(resolved_ip):
+                return f"Hostname resolves to private IP ({resolved_ip}). Not allowed."
+    except socket.gaierror:
+        # Cannot resolve hostname — allow; the HTTP client will fail later
+        pass
 
     return None
 

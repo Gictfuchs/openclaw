@@ -64,6 +64,13 @@ class WebScrapeTool(BaseTool):
         try:
             resp = await self._client.get(url)
             resp.raise_for_status()
+            # Redirect-SSRF check: validate the final URL after redirects
+            final_url = str(resp.url)
+            if final_url != url:
+                redirect_error = validate_url(final_url)
+                if redirect_error:
+                    logger.warning("web_scrape_redirect_ssrf", original=url, final=final_url)
+                    return f"Error: Redirect target blocked — {redirect_error}"
             check_response_size(resp.content, _MAX_RESPONSE_BYTES, context="web_scrape")
         except httpx.HTTPStatusError as e:
             return f"HTTP error {e.response.status_code} fetching {url}"

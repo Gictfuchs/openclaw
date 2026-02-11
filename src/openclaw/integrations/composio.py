@@ -13,7 +13,7 @@ from typing import Any
 import httpx
 import structlog
 
-from openclaw.integrations import validate_id
+from openclaw.integrations import check_response_size, validate_id
 
 logger = structlog.get_logger()
 
@@ -80,6 +80,7 @@ class ComposioClient:
         try:
             resp = await self._client.get(f"{self._base_url}/apps")
             resp.raise_for_status()
+            check_response_size(resp.content, context="composio_list_apps")
             data = resp.json()
         except httpx.HTTPStatusError as e:
             logger.error("composio_list_apps_error", status=e.response.status_code)
@@ -112,6 +113,7 @@ class ComposioClient:
                 params={"appNames": app_key},
             )
             resp.raise_for_status()
+            check_response_size(resp.content, context="composio_list_actions")
             data = resp.json()
         except httpx.HTTPStatusError as e:
             logger.error("composio_list_actions_error", status=e.response.status_code, app=app_key)
@@ -159,10 +161,14 @@ class ComposioClient:
                 json=payload,
             )
             resp.raise_for_status()
+            check_response_size(resp.content, context="composio_execute")
             data = resp.json()
         except httpx.HTTPStatusError as e:
             logger.error("composio_execute_error", status=e.response.status_code, action=action_name)
             return ComposioExecutionResult(success=False, error=f"HTTP {e.response.status_code}")
+        except ValueError as e:
+            logger.error("composio_execute_error", error=str(e), action=action_name)
+            return ComposioExecutionResult(success=False, error=str(e))
         except Exception as e:
             logger.error("composio_execute_error", error=str(e), action=action_name)
             return ComposioExecutionResult(success=False, error=str(e))
@@ -181,6 +187,7 @@ class ComposioClient:
         try:
             resp = await self._client.get(f"{self._base_url}/connectedAccounts")
             resp.raise_for_status()
+            check_response_size(resp.content, context="composio_connected_apps")
             data = resp.json()
         except httpx.HTTPStatusError as e:
             logger.error("composio_connected_apps_error", status=e.response.status_code)

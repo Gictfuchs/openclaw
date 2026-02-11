@@ -218,16 +218,20 @@ class TokenBudget:
         self._killed = False
         logger.info("budget_resumed")
 
-    def get_status(self) -> dict[str, Any]:
-        """Get current budget status."""
-        self._rotate_if_needed()
-        return {
-            "daily_usage": self._daily_usage,
-            "daily_limit": self.daily_limit,
-            "daily_remaining": max(0, self.daily_limit - self._daily_usage),
-            "monthly_usage": self._monthly_usage,
-            "monthly_limit": self.monthly_limit,
-            "monthly_remaining": max(0, self.monthly_limit - self._monthly_usage),
-            "killed": self._killed,
-            "date": str(self._current_day),
-        }
+    async def get_status(self) -> dict[str, Any]:
+        """Get current budget status (async-safe).
+
+        Acquires the lock to ensure consistent reads and safe rotation.
+        """
+        async with self._lock:
+            self._rotate_if_needed()
+            return {
+                "daily_usage": self._daily_usage,
+                "daily_limit": self.daily_limit,
+                "daily_remaining": max(0, self.daily_limit - self._daily_usage),
+                "monthly_usage": self._monthly_usage,
+                "monthly_limit": self.monthly_limit,
+                "monthly_remaining": max(0, self.monthly_limit - self._monthly_usage),
+                "killed": self._killed,
+                "date": str(self._current_day),
+            }

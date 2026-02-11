@@ -12,7 +12,7 @@ from typing import Any
 import httpx
 import structlog
 
-from openclaw.integrations import validate_id
+from openclaw.integrations import check_response_size, validate_id
 
 logger = structlog.get_logger()
 
@@ -95,6 +95,7 @@ class AgentMailClient:
         try:
             resp = await self._client.post(f"{self._base_url}/inboxes", json=payload)
             resp.raise_for_status()
+            check_response_size(resp.content, context="agentmail_create_inbox")
             data = resp.json()
         except httpx.HTTPStatusError as e:
             logger.error("agentmail_create_inbox_error", status=e.response.status_code)
@@ -117,6 +118,7 @@ class AgentMailClient:
         try:
             resp = await self._client.get(f"{self._base_url}/inboxes")
             resp.raise_for_status()
+            check_response_size(resp.content, context="agentmail_list_inboxes")
             data = resp.json()
         except httpx.HTTPStatusError as e:
             logger.error("agentmail_list_inboxes_error", status=e.response.status_code)
@@ -162,6 +164,7 @@ class AgentMailClient:
                 params=params,
             )
             resp.raise_for_status()
+            check_response_size(resp.content, context="agentmail_get_messages")
             data = resp.json()
         except httpx.HTTPStatusError as e:
             logger.error("agentmail_get_messages_error", status=e.response.status_code)
@@ -199,6 +202,7 @@ class AgentMailClient:
                 json=payload,
             )
             resp.raise_for_status()
+            check_response_size(resp.content, context="agentmail_send")
             data = resp.json()
         except httpx.HTTPStatusError as e:
             logger.error("agentmail_send_error", status=e.response.status_code)
@@ -234,6 +238,7 @@ class AgentMailClient:
                 json=payload,
             )
             resp.raise_for_status()
+            check_response_size(resp.content, context="agentmail_search")
             data = resp.json()
         except httpx.HTTPStatusError as e:
             logger.error("agentmail_search_error", status=e.response.status_code)

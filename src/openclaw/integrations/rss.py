@@ -66,6 +66,14 @@ class RSSClient:
             logger.error("rss_fetch_error", url=url, error=str(e))
             raise
 
+        # --- Redirect-SSRF check: validate final URL after redirects ---
+        final_url = str(resp.url)
+        if final_url != url:
+            redirect_error = validate_url(final_url)
+            if redirect_error:
+                logger.warning("rss_redirect_ssrf", original=url, final=final_url)
+                raise ValueError(f"Redirect target blocked — {redirect_error}")
+
         # --- Response size check ---
         content_length = len(resp.content)
         if content_length > _MAX_RESPONSE_BYTES:
